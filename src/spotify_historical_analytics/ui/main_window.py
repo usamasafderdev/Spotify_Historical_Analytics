@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import logging
 from pathlib import Path
+import tempfile
 
 import pyqtgraph as pg
-from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QCursor, QFont
+from PySide6.QtCore import QThread, QUrl, Qt, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QCursor, QDesktopServices, QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -24,6 +26,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -33,7 +37,7 @@ from PySide6.QtWidgets import (
     QToolTip,
 )
 
-from ..config import APP_NAME
+from ..config import APP_NAME, APP_VERSION, APP_ROOT, BACKUP_DIR, EXPORT_DIR, LOG_DIR
 from ..db import DatabaseManager
 from ..metadata_importer import (
     METADATA_FIELDS,
@@ -42,7 +46,14 @@ from ..metadata_importer import (
     suggest_metadata_columns,
 )
 from ..services.analytics import AnalyticsService
-from .workers import DashboardQueryWorker, ImportWorker
+from ..resources import resource_path
+from ..settings import SettingsStore
+from .workers import (
+    DashboardQueryWorker,
+    DetailQueryWorker,
+    ExportWorker,
+    ImportWorker,
+)
 
 
 COLORS = {
@@ -78,6 +89,7 @@ class KPIWidget(QFrame):
         self.title.setObjectName("eyebrow")
         self.value = QLabel("—")
         self.value.setObjectName("kpiValue")
+        self.value.setWordWrap(True)
         self.value.setToolTip(description)
         self.subtitle = QLabel(description)
         self.subtitle.setObjectName("muted")
@@ -96,6 +108,26 @@ class NumericTableItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+class NavigationButton(QPushButton):
+    def __init__(self, icon_text: str, label_text: str) -> None:
+        super().__init__()
+        self.setAccessibleName(label_text)
+        self.setAccessibleDescription(f"Open the {label_text} page.")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 8, 0)
+        layout.setSpacing(12)
+        icon = QLabel(icon_text)
+        icon.setObjectName("navIcon")
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setFixedWidth(22)
+        icon.setAttribute(Qt.WA_TransparentForMouseEvents)
+        label = QLabel(label_text)
+        label.setObjectName("navLabel")
+        label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        layout.addWidget(icon)
+        layout.addWidget(label, 1)
+
+
 class ChartPanel(QFrame):
     def __init__(self, title: str, subtitle: str = "") -> None:
         super().__init__()
@@ -111,6 +143,7 @@ class ChartPanel(QFrame):
         layout.addWidget(self.subtitle)
         self.plot = pg.PlotWidget(axisItems={"bottom": pg.DateAxisItem(orientation="bottom")})
         self.plot.setBackground(COLORS["card"])
+        self.setMinimumHeight(280)
         self.plot.showGrid(x=True, y=True, alpha=0.16)
         self.plot.getAxis("left").setTextPen(COLORS["muted"])
         self.plot.getAxis("bottom").setTextPen(COLORS["muted"])
@@ -234,6 +267,17 @@ class MainWindow(QMainWindow):
     def __init__(self, db: DatabaseManager | None = None) -> None:
         super().__init__()
         self.db = db or DatabaseManager()
+        self.settings = SettingsStore()
+        if self.settings.load_error:
+            logging.getLogger("us_music_charts_analytics").error(self.settings.load_error)
+            QMessageBox.warning(
+                None,
+                "Settings unavailable",
+                "Saved import/export folder preferences could not be read. "
+                "Default folders will be used; your database and chart records are unchanged.\n\n"
+                f"Details: {self.settings.load_error}",
+            )
+        self._production_db = self.db
         self.analytics = AnalyticsService(self.db)
         self.active_start: str | None = None
         self.active_end: str | None = None
@@ -245,33 +289,51 @@ class MainWindow(QMainWindow):
         self._dashboard_generation = 0
         self._dashboard_payload: dict | None = None
         self._query_threads: dict[int, tuple[QThread, DashboardQueryWorker]] = {}
+        self._detail_threads: dict[int, tuple[QThread, DetailQueryWorker]] = {}
+        self._export_threads: dict[int, tuple[QThread, ExportWorker]] = {}
+        self._detail_generation = 0
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(250)
+        self._search_timer.timeout.connect(self.refresh_dashboard)
+        self._demo_tempdir: tempfile.TemporaryDirectory[str] | None = None
+        self._demo_db: DatabaseManager | None = None
+        self._demo_mode = False
         self._build_ui()
         self._update_date_bounds()
         self.refresh_dashboard()
 
     def _build_ui(self) -> None:
         self.setWindowTitle(APP_NAME)
+        self.setWindowIcon(QIcon(str(resource_path("assets/app_icon.ico"))))
         self.resize(1500, 920)
-        self.setMinimumSize(1050, 680)
+        self.setMinimumSize(1120, 700)
         self.setStyleSheet(
             f"""
-            QWidget {{ background:{COLORS['background']}; color:{COLORS['text']}; font-family:'Segoe UI'; font-size:13px; }}
+            QWidget {{ color:{COLORS['text']}; font-family:'Segoe UI'; font-size:13px; }}
+            QLabel {{ background:transparent; color:{COLORS['text']}; }}
             QMainWindow {{ background:{COLORS['background']}; }}
+            QWidget#centralRoot, QWidget#mainContent, QScrollArea#contentScroll {{ background:{COLORS['background']}; }}
+            QScrollArea#contentScroll {{ border:0; }}
             QFrame#sidebar {{ background:{COLORS['sidebar']}; border-right:1px solid {COLORS['border']}; }}
             QFrame#card {{ background:{COLORS['card']}; border:1px solid {COLORS['border']}; border-radius:12px; }}
             QLabel#muted {{ color:{COLORS['muted']}; font-size:11px; }}
             QLabel#eyebrow {{ color:{COLORS['muted']}; font-size:10px; font-weight:700; letter-spacing:1px; }}
-            QLabel#kpiValue {{ color:{COLORS['text']}; font-size:27px; font-weight:700; }}
+            QLabel#kpiValue {{ color:{COLORS['text']}; font-size:25px; font-weight:700; }}
             QLabel#panelTitle {{ color:{COLORS['text']}; font-size:15px; font-weight:700; }}
-            QLabel#emptyState {{ color:{COLORS['muted']}; padding:20px; }}
+            QLabel#emptyState {{ background:{COLORS['card']}; color:{COLORS['muted']}; padding:20px; border:1px dashed {COLORS['border']}; border-radius:10px; }}
             QPushButton {{ background:{COLORS['card']}; border:1px solid {COLORS['border']}; border-radius:7px; padding:8px 12px; color:{COLORS['text']}; }}
             QPushButton:hover {{ border-color:{COLORS['accent_light']}; background:#222B3B; }}
+            QPushButton:focus {{ border:1px solid {COLORS['accent_light']}; }}
             QPushButton#primary {{ background:{COLORS['accent']}; border-color:{COLORS['accent']}; font-weight:600; }}
             QPushButton#primary:hover {{ background:{COLORS['accent_light']}; }}
-            QPushButton#nav {{ text-align:left; background:transparent; border:0; padding:11px 12px; color:{COLORS['muted']}; }}
+            QPushButton#nav {{ text-align:left; background:transparent; border:0; border-radius:7px; padding:9px 0; color:{COLORS['muted']}; min-height:22px; }}
             QPushButton#nav:hover {{ background:#202838; color:{COLORS['text']}; }}
             QPushButton#nav[active="true"] {{ color:{COLORS['text']}; background:#26203B; border-left:3px solid {COLORS['accent']}; }}
-            QLineEdit, QComboBox, QDateEdit {{ background:#121823; border:1px solid {COLORS['border']}; border-radius:6px; padding:7px 9px; min-height:20px; }}
+            QPushButton#nav QLabel#navIcon, QPushButton#nav QLabel#navLabel {{ color:{COLORS['muted']}; }}
+            QPushButton#nav[active="true"] QLabel#navIcon, QPushButton#nav[active="true"] QLabel#navLabel {{ color:{COLORS['text']}; }}
+            QLineEdit, QComboBox, QDateEdit {{ background:#121823; border:1px solid {COLORS['border']}; border-radius:6px; padding:7px 9px; min-height:22px; }}
+            QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{ border-color:{COLORS['accent_light']}; }}
             QComboBox QAbstractItemView {{ background:#121823; selection-background-color:{COLORS['accent']}; }}
             QTableWidget {{ background:{COLORS['card']}; alternate-background-color:#202938; gridline-color:{COLORS['border']}; border:1px solid {COLORS['border']}; border-radius:8px; selection-background-color:#42316B; }}
             QHeaderView::section {{ background:#202938; color:{COLORS['muted']}; border:0; border-bottom:1px solid {COLORS['border']}; padding:9px; font-weight:600; }}
@@ -280,6 +342,7 @@ class MainWindow(QMainWindow):
         )
 
         central = QWidget()
+        central.setObjectName("centralRoot")
         root = QHBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -287,20 +350,21 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(242)
+        sidebar.setFixedWidth(252)
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(16, 22, 14, 18)
         side_layout.setSpacing(8)
-        brand = QLabel("HISTORICAL\nANALYTICS")
+        brand = QLabel("US MUSIC CHARTS\nANALYTICS")
         brand.setFont(QFont("Segoe UI", 15, QFont.Bold))
-        brand.setStyleSheet(f"color:{COLORS['text']}; letter-spacing:1px;")
+        brand.setObjectName("brand")
+        brand.setStyleSheet(f"color:{COLORS['text']}; letter-spacing:1px; background:transparent;")
         side_layout.addWidget(brand)
         product = QLabel("US music chart intelligence")
         product.setObjectName("muted")
         side_layout.addWidget(product)
         side_layout.addSpacing(24)
         for index, (label, icon, _) in enumerate(PAGES):
-            button = QPushButton(f"{icon}    {label}")
+            button = NavigationButton(icon, label)
             button.setObjectName("nav")
             button.setProperty("active", index == 0)
             button.setCursor(Qt.PointingHandCursor)
@@ -308,16 +372,25 @@ class MainWindow(QMainWindow):
             side_layout.addWidget(button)
             self._nav_buttons.append(button)
         side_layout.addStretch()
-        version = QLabel("LOCAL DATA · v0.1")
+        version = QLabel(f"LOCAL DATA · v{APP_VERSION}")
         version.setObjectName("muted")
         side_layout.addWidget(version)
         root.addWidget(sidebar)
 
         content = QWidget()
+        content.setObjectName("mainContent")
+        content.setMinimumWidth(0)
+        content.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(26, 22, 26, 20)
+        content_layout.setContentsMargins(22, 20, 22, 18)
         content_layout.setSpacing(16)
-        root.addWidget(content, 1)
+        content_scroll = QScrollArea()
+        content_scroll.setObjectName("contentScroll")
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setFrameShape(QFrame.NoFrame)
+        content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        content_scroll.setWidget(content)
+        root.addWidget(content_scroll, 1)
 
         header = QHBoxLayout()
         titles = QVBoxLayout()
@@ -335,7 +408,7 @@ class MainWindow(QMainWindow):
         self.import_button = QPushButton("Import data")
         self.import_button.setObjectName("primary")
         self.import_button.clicked.connect(self.import_file)
-        self.demo_button = QPushButton("Load demo")
+        self.demo_button = QPushButton("Preview synthetic data")
         self.demo_button.clicked.connect(self.load_demo_data)
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_dashboard)
@@ -346,45 +419,51 @@ class MainWindow(QMainWindow):
 
         filters = QFrame()
         filters.setObjectName("card")
-        filter_layout = QHBoxLayout(filters)
+        filter_layout = QGridLayout(filters)
         filter_layout.setContentsMargins(12, 10, 12, 10)
-        filter_layout.setSpacing(9)
-        filter_layout.addWidget(QLabel("CHART"))
+        filter_layout.setHorizontalSpacing(9)
+        filter_layout.setVerticalSpacing(7)
+        filter_layout.addWidget(QLabel("CHART"), 0, 0)
         self.chart_type_combo = QComboBox()
         self.chart_type_combo.addItem("Daily", "daily")
         self.chart_type_combo.addItem("Weekly", "weekly")
+        self.chart_type_combo.setMinimumWidth(108)
         self.chart_type_combo.currentIndexChanged.connect(self._chart_type_changed)
         self.chart_type_combo.setToolTip("Daily and weekly chart observations are analyzed separately.")
-        filter_layout.addWidget(self.chart_type_combo)
+        filter_layout.addWidget(self.chart_type_combo, 0, 1)
         self.start_edit = QDateEdit()
         self.start_edit.setCalendarPopup(True)
         self.start_edit.setDisplayFormat("MMM d, yyyy")
+        self.start_edit.setMinimumWidth(132)
         self.start_edit.setToolTip("Inclusive start date")
-        filter_layout.addWidget(QLabel("FROM"))
-        filter_layout.addWidget(self.start_edit)
+        filter_layout.addWidget(QLabel("FROM"), 0, 2)
+        filter_layout.addWidget(self.start_edit, 0, 3)
         self.end_edit = QDateEdit()
         self.end_edit.setCalendarPopup(True)
         self.end_edit.setDisplayFormat("MMM d, yyyy")
+        self.end_edit.setMinimumWidth(132)
         self.end_edit.setToolTip("Inclusive end date")
-        filter_layout.addWidget(QLabel("TO"))
-        filter_layout.addWidget(self.end_edit)
+        filter_layout.addWidget(QLabel("TO"), 0, 4)
+        filter_layout.addWidget(self.end_edit, 0, 5)
         apply_button = QPushButton("Apply")
         apply_button.setObjectName("primary")
         apply_button.clicked.connect(self.apply_filters)
-        filter_layout.addWidget(apply_button)
+        filter_layout.addWidget(apply_button, 0, 6)
         reset_button = QPushButton("All available")
         reset_button.clicked.connect(self.reset_filters)
-        filter_layout.addWidget(reset_button)
+        filter_layout.addWidget(reset_button, 0, 7)
         self.preset_combo = QComboBox()
+        self.preset_combo.setMinimumWidth(160)
         self.preset_combo.addItem("Date presets", None)
         for label, days in [("Last 7 days", 7), ("Last 30 days", 30), ("Last 90 days", 90), ("Last year", 365)]:
             self.preset_combo.addItem(label, days)
         self.preset_combo.currentIndexChanged.connect(self._apply_preset)
-        filter_layout.addWidget(self.preset_combo)
-        filter_layout.addStretch()
+        filter_layout.addWidget(self.preset_combo, 1, 0, 1, 2)
         self.data_status = QLabel("No imported chart data")
         self.data_status.setObjectName("muted")
-        filter_layout.addWidget(self.data_status)
+        filter_layout.addWidget(self.data_status, 1, 2, 1, 6, Qt.AlignRight)
+        filter_layout.setColumnStretch(3, 1)
+        filter_layout.setColumnStretch(5, 1)
         content_layout.addWidget(filters)
 
         self.demo_banner = QLabel("DEMO / SYNTHETIC observations exist. They are excluded from all real-data metrics and charts.")
@@ -399,6 +478,11 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self._build_albums_page())
         self.pages.addWidget(self._build_coverage_page())
         self.pages.addWidget(self._build_settings_page())
+        self.pages.setMinimumSize(0, 0)
+        self.pages.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.song_export_button.setEnabled(not self._demo_mode)
+        self.artist_export_button.setEnabled(not self._demo_mode)
+        self.album_export_button.setEnabled(not self._demo_mode)
         content_layout.addWidget(self.pages, 1)
 
     def _build_overview_page(self) -> QWidget:
@@ -448,14 +532,19 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         self.song_search = QLineEdit()
         self.song_search.setPlaceholderText("Search songs or artists…")
-        self.song_search.textChanged.connect(lambda _text: self.refresh_songs_table())
+        self.song_search.textChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.song_search, 1)
         controls.addWidget(QLabel("SHOW"))
         self.song_limit = QComboBox()
         for limit in (50, 100, 200):
             self.song_limit.addItem(f"Top {limit}", limit)
-        self.song_limit.currentIndexChanged.connect(lambda _index: self.refresh_songs_table())
+        self.song_limit.currentIndexChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.song_limit)
+        export_button = QPushButton("Export…")
+        export_button.setToolTip("Export the filtered Top Songs ranking to CSV or XLSX.")
+        export_button.clicked.connect(lambda: self.export_rankings("songs"))
+        self.song_export_button = export_button
+        controls.addWidget(export_button)
         layout.addLayout(controls)
         self.songs_table = QTableWidget(0, 6)
         self.songs_table.setHorizontalHeaderLabels(["Rank", "Song", "Artist", "Total streams", "Best position", "Appearances"])
@@ -490,14 +579,19 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         self.artist_search = QLineEdit()
         self.artist_search.setPlaceholderText("Search artist name or supplied ID…")
-        self.artist_search.textChanged.connect(lambda _text: self.refresh_artists_table())
+        self.artist_search.textChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.artist_search, 1)
         controls.addWidget(QLabel("SHOW"))
         self.artist_limit = QComboBox()
         for limit in (50, 100, 200):
             self.artist_limit.addItem(f"Top {limit}", limit)
-        self.artist_limit.currentIndexChanged.connect(lambda _index: self.refresh_artists_table())
+        self.artist_limit.currentIndexChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.artist_limit)
+        export_button = QPushButton("Export…")
+        export_button.setToolTip("Export the filtered Top Artists ranking to CSV or XLSX.")
+        export_button.clicked.connect(lambda: self.export_rankings("artists"))
+        self.artist_export_button = export_button
+        controls.addWidget(export_button)
         layout.addLayout(controls)
         self.artist_table = QTableWidget(0, 8)
         self.artist_table.setHorizontalHeaderLabels(
@@ -532,14 +626,19 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         self.album_search = QLineEdit()
         self.album_search.setPlaceholderText("Search album title, artist, or ID…")
-        self.album_search.textChanged.connect(lambda _text: self.refresh_albums_table())
+        self.album_search.textChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.album_search, 1)
         controls.addWidget(QLabel("SHOW"))
         self.album_limit = QComboBox()
         for limit in (50, 100, 200):
             self.album_limit.addItem(f"Top {limit}", limit)
-        self.album_limit.currentIndexChanged.connect(lambda _index: self.refresh_albums_table())
+        self.album_limit.currentIndexChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.album_limit)
+        export_button = QPushButton("Export…")
+        export_button.setToolTip("Export the filtered Top Albums ranking to CSV or XLSX.")
+        export_button.clicked.connect(lambda: self.export_rankings("albums"))
+        self.album_export_button = export_button
+        controls.addWidget(export_button)
         layout.addLayout(controls)
         self.album_table = QTableWidget(0, 7)
         self.album_table.setHorizontalHeaderLabels(
@@ -630,6 +729,7 @@ class MainWindow(QMainWindow):
         self.db_location.setObjectName("muted")
         card_layout.addWidget(self.db_location)
         backup_button = QPushButton("Create database backup")
+        self.backup_button = backup_button
         backup_button.clicked.connect(self.backup_database)
         card_layout.addWidget(backup_button, 0, Qt.AlignLeft)
         self.metadata_button = QPushButton("Import artist / album metadata")
@@ -638,6 +738,26 @@ class MainWindow(QMainWindow):
         self.mapping_summary_label = QLabel("")
         self.mapping_summary_label.setObjectName("muted")
         card_layout.addWidget(self.mapping_summary_label)
+        self.storage_summary = QLabel(
+            f"User data: {APP_ROOT}\n"
+            f"Database: {self.db.db_path}\n"
+            f"Backups: {BACKUP_DIR}\n"
+            f"Exports: {EXPORT_DIR}\n"
+            f"Logs: {LOG_DIR}"
+        )
+        self.storage_summary.setObjectName("muted")
+        self.storage_summary.setWordWrap(True)
+        self.storage_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        card_layout.addWidget(self.storage_summary)
+        open_data_button = QPushButton("Open data folder")
+        open_data_button.clicked.connect(lambda: self._open_data_location(APP_ROOT))
+        card_layout.addWidget(open_data_button, 0, Qt.AlignLeft)
+        open_logs_button = QPushButton("Open logs folder")
+        open_logs_button.clicked.connect(lambda: self._open_data_location(LOG_DIR))
+        card_layout.addWidget(open_logs_button, 0, Qt.AlignLeft)
+        about_button = QPushButton("About")
+        about_button.clicked.connect(self.show_about)
+        card_layout.addWidget(about_button, 0, Qt.AlignLeft)
         note = QLabel("Data remains on this computer. Confirm rights for every user-supplied source before commercial use.")
         note.setObjectName("muted")
         note.setWordWrap(True)
@@ -679,7 +799,50 @@ class MainWindow(QMainWindow):
                     self._dashboard_payload["mapping_summary"],
                 )
             else:
-                self.refresh_coverage_page()
+                self._schedule_dashboard_refresh()
+
+    def _open_data_location(self, path: Path) -> None:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+                raise OSError(f"Windows could not open the folder: {path}")
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "Folder unavailable",
+                f"Could not open this folder:\n{path}\n\n{exc}",
+            )
+
+    def show_about(self) -> None:
+        QMessageBox.about(
+            self,
+            f"About {APP_NAME}",
+            f"<h3>{APP_NAME}</h3>"
+            f"<p>Version {APP_VERSION}</p>"
+            "<p>Independent desktop software for analyzing user-supplied US chart data. "
+            "Not affiliated with, endorsed by, or an official Spotify product.</p>"
+            "<p>All rights to imported data remain subject to the applicable source terms.</p>",
+        )
+
+    def _last_directory(self, setting: str) -> str:
+        saved = self.settings.get(setting)
+        return str(Path(saved)) if saved and Path(saved).is_dir() else str(Path.home())
+
+    def _remember_directory(self, setting: str, file_path: str) -> None:
+        if file_path:
+            try:
+                self.settings.set(setting, str(Path(file_path).resolve().parent))
+            except (OSError, RuntimeError) as exc:
+                QMessageBox.warning(
+                    self,
+                    "Settings could not be saved",
+                    f"The selected file remains available, but the last-used folder could not be saved:\n{exc}",
+                )
+
+    def _schedule_dashboard_refresh(self) -> None:
+        self._dashboard_generation += 1
+        self.statusBar().showMessage("Searching filtered results…")
+        self._search_timer.start()
 
     def _chart_type_changed(self) -> None:
         self.active_chart_type = str(self.chart_type_combo.currentData() or "daily")
@@ -687,30 +850,48 @@ class MainWindow(QMainWindow):
         self.refresh_dashboard()
 
     def _update_date_bounds(self) -> None:
-        bounds = self.analytics.available_date_bounds(self.active_chart_type)
-        min_date = date.fromisoformat(bounds["earliest"]) if bounds["earliest"] else date(2000, 1, 1)
-        max_date = date.fromisoformat(bounds["latest"]) if bounds["latest"] else date.today()
+        bounds = self.analytics.available_date_bounds(
+            self.active_chart_type, include_demo=self._demo_mode
+        )
+        today = date.today()
+        reporting_start = date(2017, 1, 1)
+        earliest = date.fromisoformat(bounds["earliest"]) if bounds["earliest"] else None
+        latest = date.fromisoformat(bounds["latest"]) if bounds["latest"] else None
+        min_date = min(earliest, reporting_start) if earliest else reporting_start
+        max_date = today
         if self.active_start:
             min_date = min(min_date, date.fromisoformat(self.active_start))
         if self.active_end:
-            max_date = max(max_date, date.fromisoformat(self.active_end))
+            max_date = min(today, max(max_date, date.fromisoformat(self.active_end)))
+        if min_date > max_date:
+            min_date = max_date
         self.start_edit.setMinimumDate(min_date)
         self.start_edit.setMaximumDate(max_date)
         self.end_edit.setMinimumDate(min_date)
         self.end_edit.setMaximumDate(max_date)
-        self.start_edit.setDate(date.fromisoformat(self.active_start) if self.active_start else min_date)
-        self.end_edit.setDate(date.fromisoformat(self.active_end) if self.active_end else max_date)
+        default_start = earliest if earliest and earliest <= today else reporting_start
+        default_end = min(latest, today) if latest else today
+        if earliest and earliest < reporting_start:
+            self.start_edit.setToolTip(
+                f"Imported observations begin on {earliest.isoformat()}, before the client default reporting window of 2017."
+            )
+        else:
+            self.start_edit.setToolTip("Inclusive start date. The default reporting window begins January 1, 2017.")
+        self.start_edit.setDate(
+            date.fromisoformat(self.active_start) if self.active_start else default_start
+        )
+        self.end_edit.setDate(
+            date.fromisoformat(self.active_end) if self.active_end else default_end
+        )
 
     def _apply_preset(self) -> None:
         days = self.preset_combo.currentData()
         if days is None:
             return
-        bounds = self.analytics.available_date_bounds(self.active_chart_type)
-        if not bounds["latest"]:
-            self.statusBar().showMessage("There are no real imported dates for this chart type.")
-            self.preset_combo.setCurrentIndex(0)
-            return
-        end = date.fromisoformat(bounds["latest"])
+        bounds = self.analytics.available_date_bounds(
+            self.active_chart_type, include_demo=self._demo_mode
+        )
+        end = min(date.fromisoformat(bounds["latest"]), date.today()) if bounds["latest"] else date.today()
         start = end - timedelta(days=int(days) - 1)
         if bounds["earliest"]:
             start = max(start, date.fromisoformat(bounds["earliest"]))
@@ -727,9 +908,8 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid date range", str(exc))
             return
-        bounds = self.analytics.available_date_bounds(self.active_chart_type)
-        self.active_start = start if bounds["earliest"] else None
-        self.active_end = end if bounds["latest"] else None
+        self.active_start = start
+        self.active_end = end
         self.refresh_dashboard()
 
     def reset_filters(self) -> None:
@@ -747,6 +927,7 @@ class MainWindow(QMainWindow):
         }
 
     def refresh_dashboard(self) -> None:
+        self._search_timer.stop()
         self._dashboard_generation += 1
         generation = self._dashboard_generation
         self.statusBar().showMessage("Refreshing analytics in the background…")
@@ -763,6 +944,7 @@ class MainWindow(QMainWindow):
             song_limit=int(self.song_limit.currentData()) if hasattr(self, "song_limit") else 50,
             artist_limit=int(self.artist_limit.currentData()) if hasattr(self, "artist_limit") else 50,
             album_limit=int(self.album_limit.currentData()) if hasattr(self, "album_limit") else 50,
+            include_demo=self._demo_mode,
         )
         worker.moveToThread(thread)
         thread.setProperty("dashboardGeneration", generation)
@@ -802,15 +984,26 @@ class MainWindow(QMainWindow):
         real_rows = int(inventory["summary"]["real_rows"] or 0)
         demo_rows = int(inventory["summary"]["demo_rows"] or 0)
         self.data_status.setText(f"{real_rows:,} real rows · {demo_rows:,} demo rows")
-        self.demo_banner.setVisible(demo_rows > 0)
-        self.overview_empty.setVisible(real_rows == 0)
+        if self._demo_mode:
+            self.demo_banner.setText(
+                "DEMO / SYNTHETIC MODE — isolated generated test records only. No production observations are shown."
+            )
+            self.demo_banner.setVisible(True)
+        else:
+            self.demo_banner.setText(
+                "DEMO / SYNTHETIC observations exist in the isolated demo fixture and are excluded from real-data metrics."
+            )
+            self.demo_banner.setVisible(demo_rows > 0)
+        self.overview_empty.setVisible(real_rows == 0 and not self._demo_mode)
         self._render_streams_chart(payload["streams"])
         self._render_top_songs_chart(overview["top_tracks"])
         self.refresh_songs_table(payload["songs"])
         self.refresh_artists_table(payload["artists"])
         self.refresh_albums_table(payload["albums"])
         self.refresh_coverage_page(inventory, payload["coverage"], payload["mapping_summary"])
-        if real_rows:
+        if self._demo_mode:
+            self.statusBar().showMessage("DEMO / SYNTHETIC mode: generated fixture data is isolated from production data.")
+        elif real_rows:
             self.statusBar().showMessage("Charts and rankings reflect real imported observations only.")
         elif demo_rows:
             self.statusBar().showMessage("Only synthetic demo data exists. Real-data charts and rankings remain empty.")
@@ -923,16 +1116,9 @@ class MainWindow(QMainWindow):
     def refresh_songs_table(self, rows: list[dict] | None = None) -> None:
         if not hasattr(self, "songs_table"):
             return
-        search = self.song_search.text().strip() if hasattr(self, "song_search") else ""
-        limit = int(self.song_limit.currentData()) if hasattr(self, "song_limit") else 50
         if rows is None:
-            rows = self.db.get_top_tracks(
-                limit=limit,
-                start_date=self.active_start,
-                end_date=self.active_end,
-                chart_type=self.active_chart_type,
-                search=search or None,
-            )
+            self._schedule_dashboard_refresh()
+            return
         table = self.songs_table
         table.setSortingEnabled(False)
         table.setRowCount(0)
@@ -965,18 +1151,9 @@ class MainWindow(QMainWindow):
         if key_item is None:
             return
         track_key = key_item.data(Qt.UserRole)
-        detail = self.analytics.song_detail_by_key(
-            track_key,
-            start_date=self.active_start,
-            end_date=self.active_end,
-            chart_type=self.active_chart_type,
-        )
-        if detail is None:
-            QMessageBox.information(self, "Song details", "No imported real-data observations match this song in the selected range.")
-            return
-        self._show_song_detail(detail)
+        self._start_detail_query("songs", str(track_key))
 
-    def _show_song_detail(self, detail: dict) -> None:
+    def _show_song_detail(self, detail: dict, rows: list[dict]) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Song details · {detail['track_name']}")
         dialog.resize(760, 560)
@@ -997,12 +1174,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(metrics)
         panel = ChartPanel("Historical streams", "Observations shown for the active chart type and selected date range.")
         layout.addWidget(panel, 1)
-        rows = self.analytics.streams_over_time(
-            self.active_start,
-            self.active_end,
-            self.active_chart_type,
-            detail["track_key"],
-        )
         if rows:
             x = [datetime.fromisoformat(row["chart_date"]).timestamp() for row in rows]
             y = [int(row["streams"]) for row in rows]
@@ -1021,13 +1192,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "artist_table"):
             return
         if rows is None:
-            rows = self.analytics.artist_rankings(
-                start_date=self.active_start,
-                end_date=self.active_end,
-                chart_type=self.active_chart_type,
-                limit=int(self.artist_limit.currentData()) if hasattr(self, "artist_limit") else 50,
-                search=self.artist_search.text().strip() or None if hasattr(self, "artist_search") else None,
-            )
+            self._schedule_dashboard_refresh()
+            return
         table = self.artist_table
         table.setSortingEnabled(False)
         table.setRowCount(0)
@@ -1065,15 +1231,9 @@ class MainWindow(QMainWindow):
         if row_index < 0:
             return
         artist_key = self.artist_table.item(row_index, 1).data(Qt.UserRole)
-        detail = self.db.get_artist_detail(
-            artist_key,
-            self.active_start,
-            self.active_end,
-            self.active_chart_type,
-        )
-        if detail is None:
-            QMessageBox.information(self, "Artist details", "No matching observations are available in this filter.")
-            return
+        self._start_detail_query("artists", str(artist_key))
+
+    def _show_artist_detail(self, detail: dict, rows: list[dict]) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Artist details · {detail['artist_name']}")
         dialog.resize(780, 580)
@@ -1101,9 +1261,6 @@ class MainWindow(QMainWindow):
         metrics.setWordWrap(True)
         layout.addWidget(metrics)
         panel = ChartPanel("Artist credited streams over time", "Full-credit mapped streams can overlap other artist totals.")
-        rows = self.analytics.artist_streams_over_time(
-            artist_key, self.active_start, self.active_end, self.active_chart_type
-        )
         self._populate_history_chart(panel, rows)
         layout.addWidget(panel, 1)
         close_button = QPushButton("Close")
@@ -1115,13 +1272,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "album_table"):
             return
         if rows is None:
-            rows = self.analytics.album_rankings(
-                start_date=self.active_start,
-                end_date=self.active_end,
-                chart_type=self.active_chart_type,
-                limit=int(self.album_limit.currentData()) if hasattr(self, "album_limit") else 50,
-                search=self.album_search.text().strip() or None if hasattr(self, "album_search") else None,
-            )
+            self._schedule_dashboard_refresh()
+            return
         table = self.album_table
         table.setSortingEnabled(False)
         table.setRowCount(0)
@@ -1157,18 +1309,9 @@ class MainWindow(QMainWindow):
         if row_index < 0:
             return
         album_id = self.album_table.item(row_index, 1).data(Qt.UserRole)
-        detail = self.analytics.album_detail(
-            album_id, self.active_start, self.active_end, self.active_chart_type
-        )
-        if detail is None:
-            QMessageBox.information(self, "Album details", "No mapped chart observations are available in this filter.")
-            return
-        tracks = self.db.get_album_tracks(
-            album_id, self.active_start, self.active_end, self.active_chart_type
-        )
-        rows = self.db.get_album_streams_over_time(
-            album_id, self.active_start, self.active_end, self.active_chart_type
-        )
+        self._start_detail_query("albums", str(album_id))
+
+    def _show_album_detail(self, detail: dict, tracks: list[dict], rows: list[dict]) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Album details · {detail['album_name']}")
         dialog.resize(900, 700)
@@ -1214,6 +1357,137 @@ class MainWindow(QMainWindow):
         close_button.clicked.connect(dialog.accept)
         layout.addWidget(close_button, 0, Qt.AlignRight)
         dialog.exec()
+
+    def _start_detail_query(self, kind: str, key: str) -> None:
+        self._detail_generation += 1
+        generation = self._detail_generation
+        dashboard_generation = self._dashboard_generation
+        self.statusBar().showMessage(f"Loading {kind[:-1] if kind.endswith('s') else kind} details…")
+        thread = QThread(self)
+        worker = DetailQueryWorker(
+            db_path=str(self.db.db_path),
+            generation=generation,
+            kind=kind,
+            key=key,
+            start_date=self.active_start,
+            end_date=self.active_end,
+            chart_type=self.active_chart_type,
+            dashboard_generation=dashboard_generation,
+            include_demo=self._demo_mode,
+        )
+        worker.moveToThread(thread)
+        thread.setProperty("detailGeneration", generation)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._on_detail_query_completed)
+        worker.failed.connect(self._on_detail_query_failed)
+        worker.completed.connect(thread.quit, Qt.DirectConnection)
+        worker.failed.connect(thread.quit, Qt.DirectConnection)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._on_detail_query_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        self._detail_threads[generation] = (thread, worker)
+        thread.start()
+
+    def _on_detail_query_completed(self, payload: object) -> None:
+        if (
+            payload["generation"] != self._detail_generation
+            or payload["dashboard_generation"] != self._dashboard_generation
+        ):
+            return
+        detail = payload["detail"]
+        if detail is None:
+            QMessageBox.information(
+                self, "Details", "No matching real-data observations are available in this filter."
+            )
+            return
+        if payload["kind"] == "songs":
+            self._show_song_detail(detail, payload["streams"])
+        elif payload["kind"] == "artists":
+            self._show_artist_detail(detail, payload["streams"])
+        else:
+            self._show_album_detail(detail, payload["tracks"], payload["streams"])
+
+    def _on_detail_query_failed(self, error: object) -> None:
+        generation, dashboard_generation, message = error
+        if (
+            generation == self._detail_generation
+            and dashboard_generation == self._dashboard_generation
+        ):
+            QMessageBox.critical(self, "Details unavailable", str(message))
+
+    def _on_detail_query_thread_finished(self) -> None:
+        thread = self.sender()
+        if thread is not None:
+            self._detail_threads.pop(int(thread.property("detailGeneration")), None)
+
+    def export_rankings(self, category: str) -> None:
+        file_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            f"Export Top {category.title()}",
+            str(Path(self._last_directory("last_export_directory")) / f"top-{category}.csv"),
+            "CSV files (*.csv);;Excel workbooks (*.xlsx)",
+        )
+        if not file_path:
+            return
+        destination = Path(file_path)
+        if destination.suffix.lower() not in {".csv", ".xlsx"}:
+            destination = destination.with_suffix(
+                ".xlsx" if "xlsx" in selected_filter.lower() else ".csv"
+            )
+        self._remember_directory("last_export_directory", str(destination))
+        if category == "songs":
+            limit = int(self.song_limit.currentData())
+            search = self.song_search.text().strip() or None
+        elif category == "artists":
+            limit = int(self.artist_limit.currentData())
+            search = self.artist_search.text().strip() or None
+        elif category == "albums":
+            limit = int(self.album_limit.currentData())
+            search = self.album_search.text().strip() or None
+        else:
+            QMessageBox.warning(self, "Export unavailable", f"Unknown category: {category}")
+            return
+
+        thread = QThread(self)
+        worker = ExportWorker(
+            db_path=str(self.db.db_path),
+            category=category,
+            destination=str(destination),
+            start_date=self.active_start,
+            end_date=self.active_end,
+            chart_type=self.active_chart_type,
+            limit=limit,
+            search=search,
+        )
+        worker.moveToThread(thread)
+        thread.setProperty("exportGeneration", id(thread))
+        thread.started.connect(worker.run)
+        worker.progress.connect(self.statusBar().showMessage)
+        worker.completed.connect(self._on_export_completed)
+        worker.failed.connect(self._on_export_failed)
+        worker.completed.connect(thread.quit, Qt.DirectConnection)
+        worker.failed.connect(thread.quit, Qt.DirectConnection)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._on_export_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        self._export_threads[int(thread.property("exportGeneration"))] = (thread, worker)
+        self.statusBar().showMessage(f"Exporting filtered Top {category.title()}…")
+        thread.start()
+
+    def _on_export_completed(self, result: object) -> None:
+        QMessageBox.information(
+            self,
+            "Export complete",
+            f"Exported {result['row_count']:,} ranking rows to:\n{result['destination']}",
+        )
+
+    def _on_export_failed(self, message: str) -> None:
+        QMessageBox.critical(self, "Export failed", str(message))
+
+    def _on_export_thread_finished(self) -> None:
+        thread = self.sender()
+        if thread is not None:
+            self._export_threads.pop(int(thread.property("exportGeneration")), None)
 
     def _populate_history_chart(self, panel: ChartPanel, rows: list[dict]) -> None:
         panel.plot.clear()
@@ -1322,11 +1596,12 @@ class MainWindow(QMainWindow):
 
     def import_file(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Import user-supplied chart data", str(Path.home()),
+            self, "Import user-supplied chart data", self._last_directory("last_import_directory"),
             "Chart files (*.csv *.xlsx);;CSV files (*.csv);;Excel workbooks (*.xlsx)"
         )
         if not file_path:
             return
+        self._remember_directory("last_import_directory", file_path)
         path = Path(file_path)
         try:
             self._start_import_worker(
@@ -1340,11 +1615,12 @@ class MainWindow(QMainWindow):
 
     def import_metadata(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Import user-supplied artist / album metadata", str(Path.home()),
+            self, "Import user-supplied artist / album metadata", self._last_directory("last_import_directory"),
             "Metadata files (*.csv *.xlsx);;CSV files (*.csv);;Excel workbooks (*.xlsx)"
         )
         if not file_path:
             return
+        self._remember_directory("last_import_directory", file_path)
         try:
             dialog = MetadataImportDialog(file_path, self)
         except Exception as exc:
@@ -1379,9 +1655,12 @@ class MainWindow(QMainWindow):
             "Importing user-supplied data in the background…", "", 0, 0, self
         )
         self._import_progress.setWindowTitle("Import in progress")
-        self._import_progress.setWindowModality(Qt.WindowModal)
+        self._import_progress.setWindowModality(Qt.NonModal)
         self._import_progress.setCancelButton(None)
         self._import_progress.setMinimumDuration(0)
+        self._import_progress.setLabelText(
+            "Reading, validating, and importing transactionally. Cancellation is unavailable once import starts."
+        )
         self._import_progress.show()
 
         thread = QThread(self)
@@ -1396,6 +1675,7 @@ class MainWindow(QMainWindow):
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
+        worker.progress.connect(self._update_import_progress)
         worker.completed.connect(self._on_import_completed)
         worker.failed.connect(self._on_import_failed)
         worker.completed.connect(thread.quit, Qt.DirectConnection)
@@ -1406,6 +1686,10 @@ class MainWindow(QMainWindow):
         self._import_thread = thread
         self._import_worker = worker
         thread.start()
+
+    def _update_import_progress(self, message: str) -> None:
+        if self._import_progress is not None:
+            self._import_progress.setLabelText(message)
 
     def _on_import_completed(self, result: object) -> None:
         if self._import_progress is not None:
@@ -1452,19 +1736,90 @@ class MainWindow(QMainWindow):
 
     def load_demo_data(self) -> None:
         try:
-            self.db.seed_demo_dataset()
+            if self._import_thread is not None:
+                QMessageBox.information(
+                    self, "Import in progress", "Wait for the active import before changing datasets."
+                )
+                return
+            if self._demo_mode:
+                self._demo_mode = False
+                self.db = self._production_db
+                self.analytics = AnalyticsService(self.db)
+                self.demo_button.setText("Preview synthetic data")
+                self.import_button.setEnabled(True)
+                self.metadata_button.setEnabled(True)
+                self.backup_button.setEnabled(True)
+                for button in (
+                    self.song_export_button,
+                    self.artist_export_button,
+                    self.album_export_button,
+                ):
+                    button.setEnabled(True)
+                (
+                    self.active_start,
+                    self.active_end,
+                    chart_type,
+                ) = self._saved_real_filters
+                previous = self.chart_type_combo.blockSignals(True)
+                self.chart_type_combo.setCurrentIndex(
+                    max(0, self.chart_type_combo.findData(chart_type))
+                )
+                self.chart_type_combo.blockSignals(previous)
+                self.active_chart_type = chart_type
+                self.db_location.setText(str(self.db.db_path))
+            else:
+                self._saved_real_filters = (
+                    self.active_start,
+                    self.active_end,
+                    self.active_chart_type,
+                )
+                if self._demo_db is None:
+                    self._demo_tempdir = tempfile.TemporaryDirectory(
+                        prefix="spotify-analytics-demo-"
+                    )
+                    self._demo_db = DatabaseManager(
+                        Path(self._demo_tempdir.name) / "synthetic-demo.sqlite"
+                    )
+                    self._demo_db.seed_demo_dataset()
+                self._demo_mode = True
+                self.db = self._demo_db
+                self.analytics = AnalyticsService(self.db)
+                self.demo_button.setText("Return to real data")
+                self.import_button.setEnabled(False)
+                self.metadata_button.setEnabled(False)
+                self.backup_button.setEnabled(False)
+                for button in (
+                    self.song_export_button,
+                    self.artist_export_button,
+                    self.album_export_button,
+                ):
+                    button.setEnabled(False)
+                self.active_start = None
+                self.active_end = None
+                previous = self.chart_type_combo.blockSignals(True)
+                self.chart_type_combo.setCurrentIndex(
+                    max(0, self.chart_type_combo.findData("daily"))
+                )
+                self.chart_type_combo.blockSignals(previous)
+                self.active_chart_type = "daily"
+                self.db_location.setText(
+                    "Temporary isolated DEMO / SYNTHETIC fixture"
+                )
+            self._update_date_bounds()
             self.refresh_dashboard()
         except Exception as exc:
             QMessageBox.critical(self, "Demo load failed", str(exc))
 
     def backup_database(self) -> None:
+        default_backup = BACKUP_DIR / f"analytics-{datetime.now():%Y%m%d-%H%M%S}.db"
         destination, _ = QFileDialog.getSaveFileName(
-            self, "Save database backup", str(Path.home() / "spotify-analytics-backup.db"), "SQLite database (*.db)"
+            self, "Save database backup", str(default_backup), "SQLite database (*.db)"
         )
         if not destination:
             return
         try:
             self.db.backup_database(destination)
+            self._remember_directory("last_backup_directory", destination)
             QMessageBox.information(self, "Backup complete", f"Database backup saved to:\n{destination}")
         except Exception as exc:
             QMessageBox.critical(self, "Backup failed", str(exc))
@@ -1473,23 +1828,37 @@ class MainWindow(QMainWindow):
         running_queries = [
             thread for thread, _ in self._query_threads.values() if thread.isRunning()
         ]
+        running_queries.extend(
+            thread for thread, _ in self._detail_threads.values() if thread.isRunning()
+        )
+        running_queries.extend(
+            thread for thread, _ in self._export_threads.values() if thread.isRunning()
+        )
         import_running = self._import_thread is not None and self._import_thread.isRunning()
         if import_running or running_queries:
             choice = QMessageBox.question(
                 self,
                 "Background task still running",
                 "A background import or analytics query is running. Wait for it to finish before closing?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
             )
-            if choice == QMessageBox.No:
+            if choice == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
             if import_running and self._import_thread is not None:
                 self._import_thread.wait()
             for thread in running_queries:
                 thread.wait()
-        self.db.close()
+        if self._demo_mode and self._demo_db is not None:
+            self._demo_db.close()
+            self._production_db.close()
+        else:
+            self._production_db.close()
+            if self._demo_db is not None:
+                self._demo_db.close()
+        if self._demo_tempdir is not None:
+            self._demo_tempdir.cleanup()
         event.accept()
 
 

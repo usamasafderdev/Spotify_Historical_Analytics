@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import os
+import tempfile
 import uuid
 from contextlib import contextmanager
+from contextlib import closing
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Iterator
@@ -64,9 +67,18 @@ class DatabaseManager:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA journal_mode = WAL")
-        self.initialize()
+        try:
+            self.initialize()
+        except Exception:
+            self.connection.close()
+            raise
 
     def initialize(self) -> None:
+        schema_version = int(self.connection.execute("PRAGMA user_version").fetchone()[0])
+        if schema_version > 1:
+            raise RuntimeError(
+                f"Database schema version {schema_version} is newer than this application supports (1)."
+            )
         self.connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS sources (
@@ -483,9 +495,11 @@ class DatabaseManager:
                     MAX(c.chart_date) AS latest_appearance,
                     'Full-credit by supplied artist ID' AS attribution
                 FROM chart_records c
-                JOIN track_artists ta
+                JOIN (
+                    SELECT DISTINCT track_id, artist_id
+                    FROM track_artists WHERE mapping_status = 'id_match'
+                ) ta
                   ON ta.track_id = COALESCE(c.track_id, c.track_name || '|' || c.artist_names)
-                 AND ta.mapping_status = 'id_match'
                 JOIN artists a ON a.artist_id = ta.artist_id
                 WHERE {where_clause}
                 GROUP BY a.artist_id, a.artist_name
@@ -524,11 +538,15 @@ class DatabaseManager:
         start_date: str | None = None,
         end_date: str | None = None,
         chart_type: str = "daily",
+        include_demo: bool = False,
     ) -> dict | None:
         self.validate_date_range(start_date, end_date)
         chart_type = self.normalize_chart_type(chart_type) or "daily"
-        filters = ["c.country = ?", "c.chart_type = ?", "c.source <> ?"]
-        params: list[str | int] = ["US", chart_type, "DEMO / SYNTHETIC"]
+        filters = ["c.country = ?", "c.chart_type = ?"]
+        params: list[str | int] = ["US", chart_type]
+        if not include_demo:
+            filters.append("c.source <> ?")
+            params.append("DEMO / SYNTHETIC")
         if start_date:
             filters.append("c.chart_date >= ?")
             params.append(start_date)
@@ -550,8 +568,10 @@ class DatabaseManager:
                            MAX(c.chart_date) AS latest_appearance,
                            'Full-credit by supplied artist ID' AS attribution
                     FROM chart_records c
-                    JOIN track_artists ta ON ta.track_id = COALESCE(c.track_id, c.track_name || '|' || c.artist_names)
-                      AND ta.mapping_status = 'id_match'
+                    JOIN (
+                        SELECT DISTINCT track_id, artist_id
+                        FROM track_artists WHERE mapping_status = 'id_match'
+                    ) ta ON ta.track_id = COALESCE(c.track_id, c.track_name || '|' || c.artist_names)
                     JOIN artists a ON a.artist_id = ta.artist_id
                     WHERE {where_clause} AND a.artist_id = ?
                     GROUP BY a.artist_id, a.artist_name
@@ -592,11 +612,15 @@ class DatabaseManager:
         start_date: str | None = None,
         end_date: str | None = None,
         chart_type: str = "daily",
+        include_demo: bool = False,
     ) -> list[dict]:
         self.validate_date_range(start_date, end_date)
         chart_type = self.normalize_chart_type(chart_type) or "daily"
-        filters = ["c.country = ?", "c.chart_type = ?", "c.source <> ?"]
-        params: list[str | int] = ["US", chart_type, "DEMO / SYNTHETIC"]
+        filters = ["c.country = ?", "c.chart_type = ?"]
+        params: list[str | int] = ["US", chart_type]
+        if not include_demo:
+            filters.append("c.source <> ?")
+            params.append("DEMO / SYNTHETIC")
         if start_date:
             filters.append("c.chart_date >= ?")
             params.append(start_date)
@@ -631,14 +655,15 @@ class DatabaseManager:
         chart_type: str = "daily",
         limit: int = 50,
         search: str | None = None,
+        include_demo: bool = False,
     ) -> list[dict]:
         self.validate_date_range(start_date, end_date)
         chart_type = self.normalize_chart_type(chart_type) or "daily"
-        filters = [
-            "c.country = ?", "c.chart_type = ?", "c.source <> ?",
-            "ta.mapping_status = 'id_match'",
-        ]
-        params: list[str | int] = ["US", chart_type, "DEMO / SYNTHETIC"]
+        filters = ["c.country = ?", "c.chart_type = ?", "ta.mapping_status = 'id_match'"]
+        params: list[str | int] = ["US", chart_type]
+        if not include_demo:
+            filters.append("c.source <> ?")
+            params.append("DEMO / SYNTHETIC")
         if start_date:
             filters.append("c.chart_date >= ?")
             params.append(start_date)
@@ -676,14 +701,18 @@ class DatabaseManager:
         start_date: str | None = None,
         end_date: str | None = None,
         chart_type: str = "daily",
+        include_demo: bool = False,
     ) -> dict | None:
         self.validate_date_range(start_date, end_date)
         chart_type = self.normalize_chart_type(chart_type) or "daily"
         filters = [
-            "c.country = ?", "c.chart_type = ?", "c.source <> ?",
+            "c.country = ?", "c.chart_type = ?",
             "ta.album_id = ?", "ta.mapping_status = 'id_match'",
         ]
-        params: list[str | int] = ["US", chart_type, "DEMO / SYNTHETIC", album_id]
+        params: list[str | int] = ["US", chart_type, album_id]
+        if not include_demo:
+            filters.insert(2, "c.source <> ?")
+            params.insert(2, "DEMO / SYNTHETIC")
         if start_date:
             filters.append("c.chart_date >= ?")
             params.append(start_date)
@@ -715,14 +744,18 @@ class DatabaseManager:
         start_date: str | None = None,
         end_date: str | None = None,
         chart_type: str = "daily",
+        include_demo: bool = False,
     ) -> list[dict]:
         self.validate_date_range(start_date, end_date)
         chart_type = self.normalize_chart_type(chart_type) or "daily"
         filters = [
-            "c.country = ?", "c.chart_type = ?", "c.source <> ?",
+            "c.country = ?", "c.chart_type = ?",
             "ta.album_id = ?", "ta.mapping_status = 'id_match'",
         ]
-        params: list[str | int] = ["US", chart_type, "DEMO / SYNTHETIC", album_id]
+        params: list[str | int] = ["US", chart_type, album_id]
+        if not include_demo:
+            filters.insert(2, "c.source <> ?")
+            params.insert(2, "DEMO / SYNTHETIC")
         if start_date:
             filters.append("c.chart_date >= ?")
             params.append(start_date)
@@ -752,14 +785,18 @@ class DatabaseManager:
         start_date: str | None = None,
         end_date: str | None = None,
         chart_type: str = "daily",
+        include_demo: bool = False,
     ) -> list[dict]:
         self.validate_date_range(start_date, end_date)
         chart_type = self.normalize_chart_type(chart_type) or "daily"
         filters = [
-            "c.country = ?", "c.chart_type = ?", "c.source <> ?",
+            "c.country = ?", "c.chart_type = ?",
             "ta.album_id = ?", "ta.mapping_status = 'id_match'",
         ]
-        params: list[str | int] = ["US", chart_type, "DEMO / SYNTHETIC", album_id]
+        params: list[str | int] = ["US", chart_type, album_id]
+        if not include_demo:
+            filters.insert(2, "c.source <> ?")
+            params.insert(2, "DEMO / SYNTHETIC")
         if start_date:
             filters.append("c.chart_date >= ?")
             params.append(start_date)
@@ -783,8 +820,10 @@ class DatabaseManager:
         row = self.connection.execute(
             """
                 SELECT
-                    (SELECT COUNT(*) FROM track_artists WHERE mapping_status = 'id_match') AS artist_track_mappings,
-                    (SELECT COUNT(*) FROM track_albums WHERE mapping_status = 'id_match') AS album_track_mappings,
+                    (SELECT COUNT(DISTINCT track_id || '|' || artist_id)
+                     FROM track_artists WHERE mapping_status = 'id_match') AS artist_track_mappings,
+                    (SELECT COUNT(DISTINCT track_id || '|' || album_id)
+                     FROM track_albums WHERE mapping_status = 'id_match') AS album_track_mappings,
                     (SELECT COUNT(DISTINCT track_id) FROM chart_records
                      WHERE track_id IS NOT NULL AND source <> 'DEMO / SYNTHETIC') AS chart_track_ids,
                     (SELECT COUNT(DISTINCT c.track_id) FROM chart_records c
@@ -854,11 +893,15 @@ class DatabaseManager:
         end_date: str | None = None,
         chart_type: str = "daily",
         track_key: str | None = None,
+        include_demo: bool = False,
     ) -> list[dict]:
         self.validate_date_range(start_date, end_date)
         chart_type = self.normalize_chart_type(chart_type) or "daily"
-        filters = ["country = ?", "chart_type = ?", "source <> ?"]
-        params: list[str | int] = ["US", chart_type, "DEMO / SYNTHETIC"]
+        filters = ["country = ?", "chart_type = ?"]
+        params: list[str | int] = ["US", chart_type]
+        if not include_demo:
+            filters.append("source <> ?")
+            params.append("DEMO / SYNTHETIC")
         if start_date:
             filters.append("chart_date >= ?")
             params.append(start_date)
@@ -881,7 +924,7 @@ class DatabaseManager:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_data_inventory(self) -> dict:
+    def get_data_inventory(self, include_demo: bool = False) -> dict:
         summary = self.connection.execute(
             """
                 SELECT
@@ -904,13 +947,14 @@ class DatabaseManager:
                 ORDER BY source, chart_type, country
             """
         ).fetchall()
+        year_source_filter = "" if include_demo else " AND source <> 'DEMO / SYNTHETIC'"
         year_rows = self.connection.execute(
-            """
+            f"""
                 SELECT substr(chart_date, 1, 4) AS year, chart_type,
                        COUNT(DISTINCT chart_date) AS dates_with_data,
                        COUNT(*) AS row_count
                 FROM chart_records
-                WHERE country = 'US' AND source <> 'DEMO / SYNTHETIC'
+                WHERE country = 'US'{year_source_filter}
                 GROUP BY year, chart_type
                 ORDER BY year, chart_type
             """
@@ -995,51 +1039,257 @@ class DatabaseManager:
 
     def backup_database(self, destination: str | Path) -> Path:
         target = Path(destination)
+        if target.resolve() == self.db_path.resolve():
+            raise ValueError("The backup destination must be different from the active database.")
         target.parent.mkdir(parents=True, exist_ok=True)
-        self.connection.backup(sqlite3.connect(str(target)))
+        try:
+            with target.open("xb"):
+                pass
+        except FileExistsError:
+            raise FileExistsError(f"Backup destination already exists and was not overwritten: {target}")
+        try:
+            backup_connection = sqlite3.connect(str(target))
+            try:
+                self.connection.backup(backup_connection)
+                backup_connection.commit()
+            finally:
+                backup_connection.close()
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
         return target
 
     def restore_database(self, source_backup: str | Path) -> None:
-        backup = Path(source_backup)
+        backup = Path(source_backup).resolve()
         if not backup.exists():
             raise FileNotFoundError(f"Backup file not found: {backup}")
-        self.connection.close()
-        self.db_path.unlink(missing_ok=True)
-        sqlite3.connect(str(self.db_path)).close()
-        self.connection = sqlite3.connect(str(self.db_path))
-        self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA foreign_keys = ON")
-        self.connection.execute("PRAGMA journal_mode = WAL")
-        import shutil
-        shutil.copy2(str(backup), str(self.db_path))
+        if backup == self.db_path.resolve():
+            raise ValueError("The restore source must be a backup, not the active database.")
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path: Path | None = None
+        connection_closed = False
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=self.db_path.parent,
+                prefix=f".{self.db_path.name}.restore.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary_file:
+                temporary_path = Path(temporary_file.name)
+            with closing(sqlite3.connect(f"{backup.as_uri()}?mode=ro", uri=True)) as backup_connection:
+                with closing(sqlite3.connect(str(temporary_path))) as replacement_connection:
+                    backup_connection.backup(replacement_connection)
+                    replacement_connection.commit()
+                    integrity = replacement_connection.execute("PRAGMA integrity_check").fetchone()[0]
+                    if integrity != "ok":
+                        raise sqlite3.DatabaseError(f"Backup integrity check failed: {integrity}")
+
+            self.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self.connection.close()
+            connection_closed = True
+            os.replace(temporary_path, self.db_path)
+            temporary_path = None
+            self.db_path.with_name(f"{self.db_path.name}-wal").unlink(missing_ok=True)
+            self.db_path.with_name(f"{self.db_path.name}-shm").unlink(missing_ok=True)
+        except Exception:
+            if connection_closed:
+                self.connection = sqlite3.connect(str(self.db_path))
+                self.connection.row_factory = sqlite3.Row
+                self.connection.execute("PRAGMA foreign_keys = ON")
+                self.connection.execute("PRAGMA journal_mode = WAL")
+            raise
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
         self.connection = sqlite3.connect(str(self.db_path))
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA journal_mode = WAL")
 
     def seed_demo_dataset(self) -> str:
-        batch_id = self.create_batch(
-            source_name="DEMO / SYNTHETIC",
-            source_license="Demo only. Not real Spotify chart data.",
-            chart_type="daily",
-            country="US",
-            is_demo=True,
-        )
-        demo_rows = [
-            (batch_id, "DEMO / SYNTHETIC", "Demo only. Not real Spotify chart data.", "daily", "US", "2024-01-01", None, None, 1, "demo_track_01", "Demo Song A", "Demo Artist One", 120000),
-            (batch_id, "DEMO / SYNTHETIC", "Demo only. Not real Spotify chart data.", "daily", "US", "2024-01-01", None, None, 2, "demo_track_02", "Demo Song B", "Demo Artist One", 98000),
-            (batch_id, "DEMO / SYNTHETIC", "Demo only. Not real Spotify chart data.", "daily", "US", "2024-01-02", None, None, 1, "demo_track_01", "Demo Song A", "Demo Artist One", 135000),
-            (batch_id, "DEMO / SYNTHETIC", "Demo only. Not real Spotify chart data.", "daily", "US", "2024-01-03", None, None, 1, "demo_track_01", "Demo Song A", "Demo Artist One", 149000),
-            (batch_id, "DEMO / SYNTHETIC", "Demo only. Not real Spotify chart data.", "daily", "US", "2024-01-03", None, None, 2, "demo_track_03", "Demo Song C", "Demo Artist Two", 89000),
+        self.remove_demo_dataset()
+        source = "DEMO / SYNTHETIC"
+        source_license = "Generated fixture only. Not real Spotify data."
+        artists = [
+            (f"DEMOART{index:015d}", f"Demo Artist {index}")
+            for index in range(1, 5)
         ]
-        self.connection.executemany(
-            """
-            INSERT OR IGNORE INTO chart_records (
-                batch_id, source, source_license, chart_type, country, chart_date, weekly_start, weekly_end,
-                position, track_id, track_name, artist_names, streams, original_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [(*row[:13], None) for row in demo_rows],
-        )
-        self.connection.commit()
-        return batch_id
+        albums = [
+            (f"DEMOALB{index:015d}", name, artist)
+            for index, name, artist in [
+                (1, "Demo Album North", "Demo Artist 1"),
+                (2, "Demo Album South", "Demo Artist 2"),
+                (3, "Demo Compilation", "Various demo artists"),
+                (4, "Demo Compilation (Alternate Edition)", "Various demo artists"),
+            ]
+        ]
+        tracks = [
+            (f"demo_track_{index:02d}", f"Demo Song {index}", credited)
+            for index, credited in [
+                (1, "Demo Artist 1"),
+                (2, "Demo Artist 1"),
+                (3, "Demo Artist 2"),
+                (4, "Demo Artist 3"),
+                (5, "Demo Artist 1 & Demo Artist 2"),
+                (6, "Demo Artist 4"),
+            ]
+        ]
+        artist_by_track = {
+            tracks[0][0]: [artists[0][0]],
+            tracks[1][0]: [artists[0][0]],
+            tracks[2][0]: [artists[1][0]],
+            tracks[3][0]: [artists[2][0]],
+            tracks[4][0]: [artists[0][0], artists[1][0]],
+            tracks[5][0]: [artists[3][0]],
+        }
+        album_by_track = {
+            tracks[0][0]: [albums[0][0]],
+            tracks[1][0]: [albums[0][0]],
+            tracks[2][0]: [albums[1][0]],
+            tracks[3][0]: [albums[1][0]],
+            tracks[4][0]: [albums[2][0], albums[3][0]],
+        }
+        license_note = "DEMO / SYNTHETIC — generated values for UI testing only."
+        chart_rows: list[tuple[object, ...]] = []
+        batch_ids: dict[str, str] = {}
+        with self.transaction():
+            self.ensure_source(source, source_license, "Isolated generated demo fixture.")
+            for chart_type in ("daily", "weekly"):
+                batch_ids[chart_type] = self.create_batch(
+                    source, source_license, chart_type, "US", is_demo=True
+                )
+
+            for artist_id, artist_name in artists:
+                self.connection.execute(
+                    """
+                    INSERT INTO artists (
+                        artist_id, artist_name, source_name, source_license, metadata_batch_id
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (artist_id, artist_name, source, license_note, "synthetic-fixture"),
+                )
+            for album_id, album_name, album_artist in albums:
+                self.connection.execute(
+                    """
+                    INSERT INTO albums (
+                        album_id, album_name, album_artist, source_name, source_license,
+                        metadata_batch_id
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (album_id, album_name, album_artist, source, license_note, "synthetic-fixture"),
+                )
+            for track_id, track_name, credited_artists in tracks:
+                self.connection.execute(
+                    "INSERT INTO tracks (track_id, track_name, artist_names, source) VALUES (?, ?, ?, ?)",
+                    (track_id, track_name, credited_artists, source),
+                )
+                for artist_id in artist_by_track[track_id]:
+                    self.connection.execute(
+                        """
+                        INSERT INTO track_artists (
+                            track_id, artist_id, attribution_rule, is_primary,
+                            metadata_batch_id, mapping_status
+                        ) VALUES (?, ?, 'full-credit', 1, 'synthetic-fixture', 'id_match')
+                        """,
+                        (track_id, artist_id),
+                    )
+                for album_id in album_by_track.get(track_id, []):
+                    self.connection.execute(
+                        """
+                        INSERT INTO track_albums (
+                            track_id, album_id, mapping_confidence,
+                            metadata_batch_id, mapping_status
+                        ) VALUES (?, ?, 'synthetic-fixture', 'synthetic-fixture', 'id_match')
+                        """,
+                        (track_id, album_id),
+                    )
+
+            for year in range(2017, 2025):
+                for month in range(1, 13):
+                    if month == 4 and year % 2 == 0:
+                        continue
+                    chart_date = date(year, month, 1).isoformat()
+                    self._append_demo_chart_day(
+                        chart_rows, batch_ids["daily"], chart_date, tracks, source,
+                        source_license, year, month,
+                    )
+
+            weekly_date = date(2017, 1, 2)
+            final_week = date(2024, 12, 30)
+            week_index = 0
+            while weekly_date <= final_week:
+                if week_index % 13 != 6:
+                    self._append_demo_chart_day(
+                        chart_rows, batch_ids["weekly"], weekly_date.isoformat(),
+                        tracks, source, source_license, weekly_date.year, week_index,
+                        chart_type="weekly",
+                    )
+                weekly_date += timedelta(days=7)
+                week_index += 1
+
+            self.connection.executemany(
+                """
+                INSERT INTO chart_records (
+                    batch_id, source, source_license, chart_type, country, chart_date,
+                    weekly_start, weekly_end, position, track_id, track_name,
+                    artist_names, streams, original_url
+                ) VALUES (?, ?, ?, ?, 'US', ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                chart_rows,
+            )
+        return batch_ids["daily"]
+
+    @staticmethod
+    def _append_demo_chart_day(
+        chart_rows: list[tuple[object, ...]],
+        batch_id: str,
+        chart_date: str,
+        tracks: list[tuple[str, str, str]],
+        source: str,
+        source_license: str,
+        year: int,
+        period_index: int,
+        chart_type: str = "daily",
+    ) -> None:
+        weekly_start = chart_date if chart_type == "weekly" else None
+        weekly_end = chart_date if chart_type == "weekly" else None
+        for position, (track_id, track_name, credited_artists) in enumerate(tracks, 1):
+            streams = max(
+                1000,
+                250_000 - (position * 17_000) + ((year - 2017) * 2_300)
+                + (period_index % 19) * 1_111,
+            )
+            chart_rows.append(
+                (
+                    batch_id, source, source_license, chart_type, chart_date,
+                    weekly_start, weekly_end, position, track_id, track_name,
+                    credited_artists, streams,
+                )
+            )
+
+    def remove_demo_dataset(self) -> int:
+        with self.transaction():
+            row_count = int(
+                self.connection.execute(
+                    "SELECT COUNT(*) FROM chart_records WHERE source = 'DEMO / SYNTHETIC'"
+                ).fetchone()[0]
+            )
+            demo_track_ids = [
+                row[0]
+                for row in self.connection.execute(
+                    "SELECT track_id FROM tracks WHERE track_id LIKE 'demo_track_%'"
+                ).fetchall()
+            ]
+            self.connection.execute(
+                "DELETE FROM chart_records WHERE source = 'DEMO / SYNTHETIC'"
+            )
+            self.connection.execute(
+                "DELETE FROM import_batches WHERE source_name = 'DEMO / SYNTHETIC'"
+            )
+            for track_id in demo_track_ids:
+                self.connection.execute("DELETE FROM track_artists WHERE track_id = ?", (track_id,))
+                self.connection.execute("DELETE FROM track_albums WHERE track_id = ?", (track_id,))
+                self.connection.execute("DELETE FROM tracks WHERE track_id = ?", (track_id,))
+            self.connection.execute("DELETE FROM artists WHERE artist_id LIKE 'DEMOART%'")
+            self.connection.execute("DELETE FROM albums WHERE album_id LIKE 'DEMOALB%'")
+        return row_count

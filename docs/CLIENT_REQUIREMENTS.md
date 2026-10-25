@@ -27,6 +27,6 @@ The project must provide an initial working Windows app foundation with a docume
 
 ## Phase 2 implementation status
 - Implemented: native dashboard navigation, shared date/chart filters, real-data KPIs and charts, searchable/sortable song rankings, song details, credited-artist aggregates, source inventory, observed coverage reporting, import feedback, and backup.
-- Explicitly unavailable: album analytics, because chart imports do not contain verified album mappings.
-- Limitations: coverage is observational and unverified; GUI import is synchronous; normal Windows desktop visual review is still required.
-- Verification: `python -m pytest -q` includes analytics regressions and an offscreen Qt widget/navigation smoke test.
+- Updated in Phase 3: functional artist rankings and details using stable IDs or whole credited-string fallback; album rankings only for user-supplied stable-ID mappings; metadata preview/mapping import; transactional background imports; and background dashboard aggregate queries.
+- Limitations: coverage is observational and unverified; source completeness and licensing are not inferred; normal Windows desktop visual review is still required.
+- Verification: `python -m pytest -q` includes attribution, mapping, migrations, rollback, worker, performance, and offscreen UI regressions.

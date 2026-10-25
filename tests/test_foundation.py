@@ -32,6 +32,11 @@ def test_csv_schema_mapping_and_us_filtering(tmp_path: Path) -> None:
     assert summary["distinct_tracks"] == 2
     assert summary["distinct_artists"] == 2
     assert summary["chart_dates_with_data"] == 4
+    database_path = db.db_path
+    db.close()
+    reopened = DatabaseManager(database_path)
+    assert reopened.get_summary(chart_type="daily")["total_streams"] == 49500
+    reopened.close()
 
 
 def test_duplicate_imports_and_backup_restore(tmp_path: Path) -> None:
@@ -45,13 +50,32 @@ def test_duplicate_imports_and_backup_restore(tmp_path: Path) -> None:
     backup_path = tmp_path / "backup.db"
     db.backup_database(backup_path)
     assert backup_path.exists()
+    with pytest.raises(ValueError, match="different from the active database"):
+        db.backup_database(db.db_path)
+    backup_connection = sqlite3.connect(str(backup_path))
+    try:
+        assert backup_connection.execute(
+            "SELECT COUNT(*) FROM chart_records WHERE source = ?", ("Test Source",)
+        ).fetchone()[0] == 5
+        assert backup_connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    finally:
+        backup_connection.close()
 
     restored = DatabaseManager(tmp_path / "restored.db")
     restored.connection.execute("INSERT INTO chart_records (batch_id, source, source_license, chart_type, country, chart_date, position, track_name, artist_names, streams) VALUES ('batch-test', 'restore', 'license', 'daily', 'US', '2024-01-10', 10, 'Restore Song', 'Restore Artist', 1500)")
     restored.connection.commit()
+    with pytest.raises(FileExistsError, match="not overwritten"):
+        restored.backup_database(backup_path)
 
+    restored.restore_database(backup_path)
+    assert restored.get_summary(chart_type="daily")["total_streams"] == 49500
     restored.backup_database(tmp_path / "after_restore_backup.db")
 
+    broken_backup = tmp_path / "broken.db"
+    broken_backup.write_text("not a SQLite database", encoding="utf-8")
+    with pytest.raises(sqlite3.DatabaseError):
+        restored.restore_database(broken_backup)
+    assert restored.get_summary(chart_type="daily")["total_streams"] == 49500
 
 def test_empty_database_startup_and_demo_dataset(tmp_path: Path) -> None:
     db = DatabaseManager(tmp_path / "empty.db")
@@ -60,9 +84,19 @@ def test_empty_database_startup_and_demo_dataset(tmp_path: Path) -> None:
 
     batch = db.seed_demo_dataset()
     assert batch
+    assert db.get_summary(chart_type="daily")["total_streams"] == 0
     demo = db.get_summary(chart_type="daily", include_demo=True)
-    assert demo["total_streams"] == 591000
-    assert demo["distinct_tracks"] == 3
+    assert demo["total_streams"] > 0
+    assert demo["distinct_tracks"] == 6
+    assert db.get_summary(chart_type="weekly", include_demo=True)["total_streams"] > 0
+    assert db.get_available_date_bounds(
+        include_demo=True, chart_type="daily"
+    ) == {"earliest": "2017-01-01", "latest": "2024-12-01"}
+    assert len(db.get_album_rankings(chart_type="daily", include_demo=True)) == 4
+    assert len(db.get_artist_summary(chart_type="daily", include_demo=True)) == 4
+    assert db.get_coverage("daily", include_demo=True)["missing_dates"]
+    assert db.remove_demo_dataset() > 0
+    assert db.get_summary(chart_type="daily", include_demo=True)["total_streams"] == 0
 
 
 def test_daily_weekly_non_mixing(tmp_path: Path) -> None:
@@ -187,11 +221,11 @@ def test_coverage_inventory_and_demo_separation(tmp_path: Path) -> None:
     real = db.get_summary(chart_type="daily")
     combined = db.get_summary(chart_type="daily", include_demo=True)
     assert real["total_streams"] == 51500
-    assert combined["total_streams"] == 642500
+    assert combined["total_streams"] > real["total_streams"]
     assert db.get_coverage("daily")["earliest"] == "2024-01-01"
     inventory = db.get_data_inventory()
     assert inventory["summary"]["real_rows"] == 6
-    assert inventory["summary"]["demo_rows"] == 5
+    assert inventory["summary"]["demo_rows"] > 5
     assert all(year["year"] == "2024" for year in inventory["years"])
 
 
@@ -208,6 +242,18 @@ def test_import_without_position_does_not_double_count_and_track_ids_merge(tmp_p
     assert result.valid_rows == 1
     assert result.duplicates_skipped == 1
     assert db.get_summary()["total_streams"] == 1200
+
+
+def test_generated_demo_source_name_is_reserved(tmp_path: Path) -> None:
+    db = DatabaseManager(tmp_path / "reserved-demo.db")
+    with pytest.raises(ValueError, match="reserved for the isolated generated demo fixture"):
+        import_csv_file(
+            db,
+            FIXTURE_CSV,
+            "DEMO / SYNTHETIC",
+            "Not a demo fixture",
+            chart_type="daily",
+        )
 
     for position, name, streams in [(1, "Original title", 2000), (2, "Alternate title", 3000)]:
         db.register_chart_record(

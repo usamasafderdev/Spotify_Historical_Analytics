@@ -1,14 +1,16 @@
-# Spotify Historical Analytics
+# US Music Charts Analytics
 
-A local Windows desktop application for analyzing user-supplied US music chart CSV/XLSX observations. Metrics are derived only from imported rows; they are not official platform totals and do not imply complete historical coverage.
+An independent local Windows desktop application for analyzing user-supplied US music chart CSV/XLSX observations. Metrics are derived only from imported rows; they are not official platform totals and do not imply complete historical coverage. The application is not affiliated with or endorsed by Spotify.
 
 ## Setup
 
-Requires Python 3.12 or newer.
+Requires Python 3.12 or newer for source development.
 
 ```powershell
-python -m pip install -e .
+python -m pip install -e ".[test,build]"
 ```
+
+The optional `test` extra provides pytest. The `build` extra provides PyInstaller and Pillow for creating the Windows application icon and executable.
 
 ## Launch
 
@@ -16,14 +18,61 @@ python -m pip install -e .
 python -m spotify_historical_analytics
 ```
 
+## Windows standalone build
+
+On a 64-bit Windows machine with the dependencies installed:
+
+```powershell
+.\scripts\build_windows.ps1
+```
+
+The script runs the test suite and syntax compilation, generates the original application icon and version resource, builds a windowed PyInstaller onedir application, launches an offscreen packaged-app smoke test, and records a SHA-256 hash. Output is written to `dist\USMusicChartsAnalytics\`. Build/test datasets, databases, and temporary output are not bundled.
+
+To create the per-user installer, install Inno Setup 6 from [jrsoftware.org/isinfo.php](https://jrsoftware.org/isinfo.php), then run:
+
+```powershell
+.\scripts\build_installer.ps1
+```
+
+The installer target is `dist\installer\US-Music-Charts-Analytics-Setup.exe`. If Inno Setup is absent, the script fails with its official installation location; the installer must not be described as compiled. The build is unsigned unless a release owner separately adds and verifies an authorized signing process.
+
+## Local data and recovery
+
+The Windows application stores writable state under `%LOCALAPPDATA%\USMusicChartsAnalytics\`:
+
+- `database\analytics.db` — SQLite chart and metadata records.
+- `logs\` — rotating local diagnostic log.
+- `backups\` — suggested location for manual database backups.
+- `exports\` — suggested location for exported reports.
+- `config\settings.json` — last-used import and export folders.
+
+The application and installer do not place the writable database in the installation directory, and uninstall does not remove the separate Local AppData directory. On first launch, if a development database is detected, the application asks whether to copy it. The original is retained, the destination is never overwritten, and a failed copy leaves the source unchanged.
+
+Use **Settings → Create database backup** before replacing or restoring data. Backups are not overwritten. Store an additional copy outside the computer for disaster recovery. No cloud sync is performed.
+
+Install a newer per-user build over the existing application to update it. The data folder is independent of the installation directory and should remain intact. Verify a backup before upgrading important client records.
+
 ## Dashboard
 
 - Overview KPIs and interactive PyQtGraph charts for real imported daily or weekly observations.
 - Shared chart-type and inclusive date filters, with last 7/30/90 days and last-year presets.
 - Top Songs rankings with search, sorting, top 50/100/200 selection, and a double-click detail view.
-- Credited-artist aggregates, source inventory, annual observation counts, missing-date inspection, and local database backup.
+- Top Artists rankings with full-credit stable-ID attribution, exact-string fallback, search, details, and a trend chart.
+- Top Albums rankings from exact user-supplied stable track/album ID mappings, with track lists and trends.
+- Source inventory, annual observation counts, missing-date inspection, and local database backup.
+- CSV/XLSX exports for filtered Top Songs, Top Artists, and Top Albums rankings. Excel files contain separate Rankings, Definitions, and Coverage & Sources sheets.
 - CSV and XLSX import with validation and duplicate reporting.
-- Synthetic demo rows are labeled and excluded from real-data KPIs, rankings, and charts.
+- Background CSV/XLSX and metadata imports, progress stages, metadata column mapping/preview, source provenance, and transaction rollback on failures.
+- Background dashboard search and song/artist/album detail queries; stale responses are discarded after newer filters.
+- Synthetic demo preview uses a temporary, isolated fixture database with multi-year daily/weekly observations, intentionally missing dates, collaborations, and labeled synthetic metadata. Returning to real data does not modify the production database.
+
+Metadata support is limited to user-supplied data. No restricted Spotify metadata is fetched or scraped. Album totals are labeled **Album charting-track streams** and do not represent comprehensive platform album totals.
+
+The initial date window begins at the earliest imported date when data exists, otherwise January 1, 2017. The end date defaults to the latest imported date or the current date and cannot be set beyond the current date.
+
+Exports use the current USA chart type, inclusive date range, search, and Top 50/100/200 selection. CSV exports include report metadata and source-coverage sections before the rankings section. XLSX exports include dedicated rankings, definitions, and source-coverage worksheets. Only the selected top-N rows are exported.
+
+**Commercial-use caution:** Spotify's Developer Policy and Developer Terms restrict certain analysis and commercial uses of Spotify Content or the Spotify Platform. User-supplied files do not automatically confer rights to use, analyze, or redistribute their contents. Review [docs/DATA_ACQUISITION_STATUS.md](docs/DATA_ACQUISITION_STATUS.md) before commercial use. This application is not affiliated with or endorsed by Spotify.
 
 ## Tests
 
@@ -34,3 +83,11 @@ python -m pytest -q
 The tests include an offscreen Qt widget/navigation smoke test. It does not replace visual verification in a normal Windows desktop session.
 
 See [docs/PHASE_2_IMPLEMENTATION.md](docs/PHASE_2_IMPLEMENTATION.md) for behavior and limitations.
+For accepted metadata columns and identity rules, see [docs/METADATA_IMPORT_GUIDE.md](docs/METADATA_IMPORT_GUIDE.md).
+For Phase 3 schema, analytics, and performance details, see [docs/PHASE_3_IMPLEMENTATION.md](docs/PHASE_3_IMPLEMENTATION.md).
+For Phase 4 behavior and limitations, see [docs/PHASE_4_IMPLEMENTATION.md](docs/PHASE_4_IMPLEMENTATION.md).
+For source and legal-readiness status, see [docs/DATA_ACQUISITION_STATUS.md](docs/DATA_ACQUISITION_STATUS.md).
+For manual desktop verification, follow [docs/WINDOWS_VISUAL_QA_CHECKLIST.md](docs/WINDOWS_VISUAL_QA_CHECKLIST.md).
+For Windows build and release status, see [docs/PHASE_5_RELEASE_PREPARATION.md](docs/PHASE_5_RELEASE_PREPARATION.md).
+For installation and data migration, see [docs/WINDOWS_INSTALLATION_GUIDE.md](docs/WINDOWS_INSTALLATION_GUIDE.md).
+For redistribution obligations, see [docs/DEPENDENCY_LICENSES.md](docs/DEPENDENCY_LICENSES.md).

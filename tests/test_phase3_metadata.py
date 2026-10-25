@@ -7,7 +7,11 @@ import pandas as pd
 import pytest
 
 from spotify_historical_analytics.db import DatabaseManager
-from spotify_historical_analytics.metadata_importer import import_metadata_dataframe
+from spotify_historical_analytics.metadata_importer import (
+    import_metadata_dataframe,
+    import_metadata_file,
+    load_metadata_preview,
+)
 
 
 TRACK_A = "A" * 22
@@ -142,6 +146,20 @@ def test_artist_full_credit_album_mappings_and_date_filtering(tmp_path: Path) ->
     assert by_key[f"id:{ARTIST_TWO}"]["charting_song_streams"] == 350
     assert by_key["credit:Comma, Ampersand & Co"]["charting_song_streams"] == 300
     assert by_key["credit:Comma, Ampersand & Co"]["attribution"] == "Unresolved credited string; not split"
+    db.connection.execute(
+        """
+        INSERT INTO track_artists (
+            track_id, artist_id, attribution_rule, is_primary, metadata_batch_id, mapping_status
+        ) VALUES (?, ?, 'alternate-import-rule', 1, ?, 'id_match')
+        """,
+        (TRACK_A, ARTIST_ONE, result.batch_id),
+    )
+    db.connection.commit()
+    deduplicated = {
+        row["artist_key"]: row
+        for row in db.get_artist_summary(chart_type="daily", limit=50)
+    }
+    assert deduplicated[f"id:{ARTIST_ONE}"]["charting_song_streams"] == 150
 
     filtered_album = db.get_album_detail(ALBUM_ONE, "2024-01-03", "2024-01-03", "daily")
     assert filtered_album is not None
@@ -254,3 +272,36 @@ def test_artist_only_metadata_import_needs_no_album_identity(tmp_path: Path) -> 
     assert result.imported_rows == 1
     assert result.artist_track_mappings == 1
     assert result.album_track_mappings == 0
+
+
+def test_metadata_xlsx_preview_and_import(tmp_path: Path) -> None:
+    db = DatabaseManager(tmp_path / "metadata_xlsx.db")
+    db.connection.execute(
+        "INSERT INTO tracks (track_id, track_name, artist_names, source) VALUES (?, ?, ?, ?)",
+        (TRACK_A, "Old title", "Original credited A, Original credited B", "chart import"),
+    )
+    db.connection.commit()
+    path = tmp_path / "metadata.xlsx"
+    metadata_frame().iloc[:1].to_excel(path, index=False)
+    preview = load_metadata_preview(path)
+    assert len(preview) == 1
+    assert "Spotify Track ID" in preview.columns
+
+    result = import_metadata_file(
+        db,
+        path,
+        "XLSX metadata source",
+        "Rights note supplied by user",
+        MAPPING,
+    )
+    assert result.imported_rows == 1
+    assert result.album_track_mappings == 1
+    assert result.artist_track_mappings == 1
+    provenance = db.connection.execute(
+        "SELECT file_name, source_license, imported_rows FROM metadata_import_batches"
+    ).fetchone()
+    assert tuple(provenance) == ("metadata.xlsx", "Rights note supplied by user", 1)
+    track = db.connection.execute(
+        "SELECT track_name, artist_names FROM tracks WHERE track_id = ?", (TRACK_A,)
+    ).fetchone()
+    assert tuple(track) == ("Mapped Track A", "Original credited A, Original credited B")

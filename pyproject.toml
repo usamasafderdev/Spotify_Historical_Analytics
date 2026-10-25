@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "spotify-historical-analytics"
+name = "us-music-charts-analytics"
 version = "0.1.0"
-description = "Windows desktop analytics for historical US Spotify chart data"
+description = "Windows desktop analytics for user-supplied US music chart data"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,15 +13,22 @@ dependencies = [
   "pandas>=2.2.0",
   "openpyxl>=3.1.0",
   "pyqtgraph>=0.13.7",
-  "pytest>=8.0.0",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8.0.0"]
+build = ["pyinstaller>=6.10.0", "Pillow>=10.0.0"]
+
 [project.scripts]
+us-music-charts-analytics = "spotify_historical_analytics.__main__:main"
 spotify-historical-analytics = "spotify_historical_analytics.__main__:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.pyright]
+exclude = ["build/**", "dist/**"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

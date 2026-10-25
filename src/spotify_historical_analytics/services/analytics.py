@@ -44,8 +44,11 @@ class AnalyticsService:
         end_date: str | None = None,
         chart_type: str = "daily",
         track_key: str | None = None,
+        include_demo: bool = False,
     ) -> list[dict]:
-        return self.db.get_streams_over_time(start_date, end_date, chart_type, track_key)
+        return self.db.get_streams_over_time(
+            start_date, end_date, chart_type, track_key, include_demo
+        )
 
     def song_detail_by_key(
         self,
@@ -64,11 +67,15 @@ class AnalyticsService:
             track_key=track_key,
         )
 
-    def data_inventory(self) -> dict:
-        return self.db.get_data_inventory()
+    def data_inventory(self, include_demo: bool = False) -> dict:
+        return self.db.get_data_inventory(include_demo=include_demo)
 
-    def available_date_bounds(self, chart_type: str = "daily") -> dict:
-        return self.db.get_available_date_bounds(include_demo=False, chart_type=chart_type)
+    def available_date_bounds(
+        self, chart_type: str = "daily", include_demo: bool = False
+    ) -> dict:
+        return self.db.get_available_date_bounds(
+            include_demo=include_demo, chart_type=chart_type
+        )
 
     def available_chart_types(self) -> list[str]:
         return self.db.get_chart_type_availability(include_demo=False)
@@ -80,10 +87,12 @@ class AnalyticsService:
         chart_type: str = "daily",
         limit: int = 50,
         search: str | None = None,
+        include_demo: bool = False,
     ) -> list[dict]:
         return self.db.get_artist_summary(
             start_date=start_date,
             end_date=end_date,
+            include_demo=include_demo,
             chart_type=chart_type,
             limit=limit,
             search=search,
@@ -95,8 +104,11 @@ class AnalyticsService:
         start_date: str | None = None,
         end_date: str | None = None,
         chart_type: str = "daily",
+        include_demo: bool = False,
     ) -> list[dict]:
-        return self.db.get_artist_streams_over_time(artist_key, start_date, end_date, chart_type)
+        return self.db.get_artist_streams_over_time(
+            artist_key, start_date, end_date, chart_type, include_demo
+        )
 
     def album_rankings(
         self,
@@ -105,8 +117,11 @@ class AnalyticsService:
         chart_type: str = "daily",
         limit: int = 50,
         search: str | None = None,
+        include_demo: bool = False,
     ) -> list[dict]:
-        return self.db.get_album_rankings(start_date, end_date, chart_type, limit, search)
+        return self.db.get_album_rankings(
+            start_date, end_date, chart_type, limit, search, include_demo
+        )
 
     def album_detail(
         self,
@@ -114,5 +129,8 @@ class AnalyticsService:
         start_date: str | None = None,
         end_date: str | None = None,
         chart_type: str = "daily",
+        include_demo: bool = False,
     ) -> dict | None:
-        return self.db.get_album_detail(album_id, start_date, end_date, chart_type)
+        return self.db.get_album_detail(
+            album_id, start_date, end_date, chart_type, include_demo
+        )

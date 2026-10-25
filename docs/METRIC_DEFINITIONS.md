@@ -14,8 +14,12 @@ These are derived from imported chart observations and are not official Spotify 
 - `Total chart streams`: summed chart-eligible streams for a tracked song in the selected date range.
 - `Best chart position`: minimum `position` value for that song across valid rows.
 - `Chart appearances`: count of unique chart dates where the song appears. For weekly charts, each chart date represents a weekly chart observation; period start/end columns are retained when available.
-- `Artist charting-song streams`: aggregate of charting-song streams for the artist, using the documented attribution rule.
-- `Album charting-track streams`: aggregate of charting-track streams for the album, using the documented mapping rule.
+- `Artist charting-song streams`: aggregate of charting-song streams assigned to a supplied artist ID, or to an unresolved exact credited-artist string when no ID mapping is present.
+- Stable-ID artist attribution is full credit per mapped track to each supplied artist ID. Collaborations with multiple mapped IDs can therefore make artist totals overlap; artist totals must not be summed as if they were unique chart streams.
+- Credited strings without IDs are retained whole. Commas, ampersands, and other text are not split. A known artist ID is not guessed from a display name.
+- `Album charting-track streams`: sum of chart-record stream rows whose stable track ID is mapped to the stable album ID by user-supplied metadata. It is not a comprehensive album total from Spotify.
+- Album editions with distinct album IDs remain separate. A charting track may legitimately be mapped to more than one edition, so totals across editions may overlap.
+- Album observations without a stable track-to-album mapping are excluded from album rankings.
 
 ## Important rules
 - Daily and weekly chart observations are never mixed in a single metric stack.
@@ -24,3 +28,8 @@ These are derived from imported chart observations and are not official Spotify 
 - Track IDs are the preferred identity; title and credited artist are used as the conservative fallback when an ID is unavailable.
 - Unknown artist or album metadata must not be guessed silently.
 - A `DEMO / SYNTHETIC` dataset is excluded from the real-data metrics review and must be visually labeled.
+- The synthetic preview uses a separate temporary SQLite database. Synthetic values are visible only while explicitly in demo mode and are never merged into production queries, backups, or exports.
+- Rankings exports use the same USA/chart/date/search ranking query and selected Top 50/100/200 limit as the on-screen result set. Exports include the metric definition, active date interval, chart type, observed coverage, and overlapping real source names and attribution notes.
+- Exported artist values preserve full-credit attribution and may overlap across collaborators. Exported album metrics remain charting-track streams, not official or comprehensive album totals.
+- Exported coverage is observed coverage only; it does not verify that a source is complete. Empty ranking exports include metadata and headers but have no ranking data rows.
+- Text values beginning with spreadsheet formula characters are escaped as text in CSV and XLSX exports.

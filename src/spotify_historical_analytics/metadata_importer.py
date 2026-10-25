@@ -4,6 +4,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
@@ -94,6 +95,7 @@ def import_metadata_dataframe(
     source_license: str,
     file_name: str,
     column_mapping: dict[str, str],
+    progress_callback: Callable[[str], None] | None = None,
 ) -> MetadataImportResult:
     missing = [
         field for field in REQUIRED_FIELDS
@@ -120,6 +122,8 @@ def import_metadata_dataframe(
     album_track_mappings = artist_track_mappings = 0
     rejected_details: list[str] = []
 
+    if progress_callback:
+        progress_callback(f"Validating and importing {total_rows:,} metadata rows…")
     with db.transaction():
         db.connection.execute(
             "INSERT OR IGNORE INTO sources (name, license, remarks) VALUES (?, ?, ?)",
@@ -135,6 +139,10 @@ def import_metadata_dataframe(
         )
 
         for row_number, (_, row) in enumerate(dataframe.iterrows(), start=2):
+            if progress_callback and (row_number == 2 or (row_number - 2) % 500 == 0):
+                progress_callback(
+                    f"Validating metadata row {row_number - 1:,} of {total_rows:,}…"
+                )
 
             def value(field: str) -> str:
                 column = column_mapping.get(field)
@@ -290,8 +298,8 @@ def import_metadata_dataframe(
 
             if track_name:
                 db.connection.execute(
-                    "UPDATE tracks SET track_name = ?, artist_names = COALESCE(?, artist_names) WHERE track_id = ?",
-                    (track_name, artist_name, track_id),
+                    "UPDATE tracks SET track_name = ? WHERE track_id = ?",
+                    (track_name, track_id),
                 )
             imported_rows += 1
 
@@ -304,6 +312,8 @@ def import_metadata_dataframe(
             (imported_rows, rejected_rows, duplicates_skipped, batch_id),
         )
 
+    if progress_callback:
+        progress_callback("Metadata import transaction committed.")
     return MetadataImportResult(
         batch_id=batch_id,
         source_name=source_name,
@@ -323,7 +333,10 @@ def import_metadata_file(
     source_name: str,
     source_license: str,
     column_mapping: dict[str, str] | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> MetadataImportResult:
+    if progress_callback:
+        progress_callback("Reading metadata file…")
     dataframe = load_metadata_dataframe(path)
     mapping = column_mapping or suggest_metadata_columns([str(column) for column in dataframe.columns])
     return import_metadata_dataframe(
@@ -333,4 +346,5 @@ def import_metadata_file(
         source_license,
         Path(path).name,
         mapping,
+        progress_callback,
     )

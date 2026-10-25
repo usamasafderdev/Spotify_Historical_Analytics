@@ -5,14 +5,17 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Slot
 
 from ..db import DatabaseManager
+from ..exports import export_rankings
 from ..importer import import_csv_file, import_xlsx_file
 from ..metadata_importer import import_metadata_file
+from ..runtime import LOGGER
 from ..services.analytics import AnalyticsService
 
 
 class ImportWorker(QObject):
     completed = Signal(object)
     failed = Signal(str)
+    progress = Signal(str)
 
     def __init__(
         self,
@@ -37,6 +40,7 @@ class ImportWorker(QObject):
     def run(self) -> None:
         db = None
         try:
+            self.progress.emit("Opening the local database…")
             db = DatabaseManager(Path(self.db_path))
             if self.kind == "metadata":
                 result = import_metadata_file(
@@ -45,6 +49,7 @@ class ImportWorker(QObject):
                     self.source_name,
                     self.source_license,
                     self.column_mapping,
+                    self.progress.emit,
                 )
             else:
                 path = Path(self.file_path)
@@ -57,9 +62,158 @@ class ImportWorker(QObject):
                     source_license=self.source_license,
                     chart_type=self.chart_type,
                     country="US",
+                    progress_callback=self.progress.emit,
                 )
             self.completed.emit(result)
         except Exception as exc:
+            LOGGER.exception("Background import failed.")
+            self.failed.emit(str(exc))
+        finally:
+            if db is not None:
+                db.close()
+
+
+class DetailQueryWorker(QObject):
+    completed = Signal(object)
+    failed = Signal(object)
+
+    def __init__(
+        self,
+        db_path: str,
+        generation: int,
+        kind: str,
+        key: str,
+        start_date: str | None,
+        end_date: str | None,
+        chart_type: str,
+        dashboard_generation: int,
+        include_demo: bool = False,
+    ) -> None:
+        super().__init__()
+        self.db_path = db_path
+        self.generation = generation
+        self.kind = kind
+        self.key = key
+        self.start_date = start_date
+        self.end_date = end_date
+        self.chart_type = chart_type
+        self.dashboard_generation = dashboard_generation
+        self.include_demo = include_demo
+
+    @Slot()
+    def run(self) -> None:
+        db = None
+        try:
+            db = DatabaseManager(Path(self.db_path))
+            if self.kind == "songs":
+                detail = db.get_song_detail(
+                    "", "", self.start_date, self.end_date,
+                    include_demo=self.include_demo,
+                    chart_type=self.chart_type, track_key=self.key,
+                )
+                result = {
+                    "detail": detail,
+                    "streams": db.get_streams_over_time(
+                        self.start_date, self.end_date, self.chart_type, self.key,
+                        self.include_demo,
+                    ),
+                }
+            elif self.kind == "artists":
+                detail = db.get_artist_detail(
+                    self.key, self.start_date, self.end_date, self.chart_type,
+                    self.include_demo,
+                )
+                result = {
+                    "detail": detail,
+                    "streams": db.get_artist_streams_over_time(
+                        self.key, self.start_date, self.end_date, self.chart_type,
+                        self.include_demo,
+                    ),
+                }
+            elif self.kind == "albums":
+                detail = db.get_album_detail(
+                    self.key, self.start_date, self.end_date, self.chart_type,
+                    self.include_demo,
+                )
+                result = {
+                    "detail": detail,
+                    "tracks": db.get_album_tracks(
+                        self.key, self.start_date, self.end_date, self.chart_type,
+                        self.include_demo,
+                    ),
+                    "streams": db.get_album_streams_over_time(
+                        self.key, self.start_date, self.end_date, self.chart_type,
+                        self.include_demo,
+                    ),
+                }
+            else:
+                raise ValueError(f"Unsupported detail category: {self.kind}")
+            self.completed.emit(
+                {
+                    "generation": self.generation,
+                    "dashboard_generation": self.dashboard_generation,
+                    "kind": self.kind,
+                    "key": self.key,
+                    **result,
+                }
+            )
+        except Exception as exc:
+            LOGGER.exception("Background detail query failed.")
+            self.failed.emit(
+                (self.generation, self.dashboard_generation, str(exc))
+            )
+        finally:
+            if db is not None:
+                db.close()
+
+
+class ExportWorker(QObject):
+    completed = Signal(object)
+    failed = Signal(str)
+    progress = Signal(str)
+
+    def __init__(
+        self,
+        db_path: str,
+        category: str,
+        destination: str,
+        start_date: str | None,
+        end_date: str | None,
+        chart_type: str,
+        limit: int,
+        search: str | None,
+    ) -> None:
+        super().__init__()
+        self.db_path = db_path
+        self.category = category
+        self.destination = destination
+        self.start_date = start_date
+        self.end_date = end_date
+        self.chart_type = chart_type
+        self.limit = limit
+        self.search = search
+
+    @Slot()
+    def run(self) -> None:
+        db = None
+        try:
+            self.progress.emit("Preparing filtered rankings and coverage…")
+            db = DatabaseManager(Path(self.db_path))
+            row_count = export_rankings(
+                db,
+                self.category,
+                self.destination,
+                self.start_date,
+                self.end_date,
+                self.chart_type,
+                self.limit,
+                self.search,
+            )
+            self.completed.emit(
+                {"destination": self.destination, "row_count": row_count}
+            )
+        except Exception as exc:
+            LOGGER.exception("Background export failed.")
             self.failed.emit(str(exc))
         finally:
             if db is not None:
@@ -83,6 +237,7 @@ class DashboardQueryWorker(QObject):
         song_limit: int,
         artist_limit: int,
         album_limit: int,
+        include_demo: bool = False,
     ) -> None:
         super().__init__()
         self.db_path = db_path
@@ -98,6 +253,7 @@ class DashboardQueryWorker(QObject):
         self.song_limit = song_limit
         self.artist_limit = artist_limit
         self.album_limit = album_limit
+        self.include_demo = include_demo
 
     @Slot()
     def run(self) -> None:
@@ -109,6 +265,7 @@ class DashboardQueryWorker(QObject):
                 limit=max(10, self.song_limit),
                 start_date=self.filters["start_date"],
                 end_date=self.filters["end_date"],
+                include_demo=self.include_demo,
                 chart_type=self.filters["chart_type"],
             )
             songs = all_songs
@@ -117,12 +274,14 @@ class DashboardQueryWorker(QObject):
                     limit=self.song_limit,
                     start_date=self.filters["start_date"],
                     end_date=self.filters["end_date"],
+                    include_demo=self.include_demo,
                     chart_type=self.filters["chart_type"],
                     search=self.song_search,
                 )
             real_summary = db.get_summary(
                 start_date=self.filters["start_date"],
                 end_date=self.filters["end_date"],
+                include_demo=self.include_demo,
                 chart_type=self.filters["chart_type"],
             )
             demo_summary = db.get_summary(
@@ -131,7 +290,7 @@ class DashboardQueryWorker(QObject):
                 chart_type=self.filters["chart_type"],
                 include_demo=True,
             )
-            has_real_data = real_summary["total_streams"] > 0
+            has_real_data = real_summary["total_streams"] > 0 and not self.include_demo
             overview = {
                 "summary": real_summary,
                 "demo_summary": demo_summary,
@@ -142,8 +301,10 @@ class DashboardQueryWorker(QObject):
             result = {
                 "generation": self.generation,
                 "overview": overview,
-                "inventory": analytics.data_inventory(),
-                "streams": analytics.streams_over_time(**self.filters),
+                "inventory": analytics.data_inventory(include_demo=self.include_demo),
+                "streams": analytics.streams_over_time(
+                    **self.filters, include_demo=self.include_demo
+                ),
                 "songs": songs,
                 "artists": analytics.artist_rankings(
                     start_date=self.filters["start_date"],
@@ -151,6 +312,7 @@ class DashboardQueryWorker(QObject):
                     chart_type=self.filters["chart_type"],
                     limit=self.artist_limit,
                     search=self.artist_search or None,
+                    include_demo=self.include_demo,
                 ),
                 "albums": analytics.album_rankings(
                     start_date=self.filters["start_date"],
@@ -158,12 +320,16 @@ class DashboardQueryWorker(QObject):
                     chart_type=self.filters["chart_type"],
                     limit=self.album_limit,
                     search=self.album_search or None,
+                    include_demo=self.include_demo,
                 ),
-                "coverage": db.get_coverage(self.filters["chart_type"]),
+                "coverage": db.get_coverage(
+                    self.filters["chart_type"], include_demo=self.include_demo
+                ),
                 "mapping_summary": db.get_metadata_mapping_summary(),
             }
             self.completed.emit(result)
         except Exception as exc:
+            LOGGER.exception("Background dashboard query failed.")
             self.failed.emit((self.generation, str(exc)))
         finally:
             if db is not None:

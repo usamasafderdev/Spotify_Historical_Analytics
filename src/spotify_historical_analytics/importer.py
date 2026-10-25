@@ -4,6 +4,7 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
@@ -64,7 +65,10 @@ def import_csv_file(
     source_license: str,
     chart_type: str = "daily",
     country: str = "US",
+    progress_callback: Callable[[str], None] | None = None,
 ) -> ImportResult:
+    if progress_callback:
+        progress_callback("Reading CSV file…")
     return _import_dataframe(
         db,
         pd.read_csv(csv_path),
@@ -73,6 +77,7 @@ def import_csv_file(
         chart_type,
         country,
         Path(csv_path).name,
+        progress_callback,
     )
 
 
@@ -83,7 +88,10 @@ def import_xlsx_file(
     source_license: str,
     chart_type: str = "daily",
     country: str = "US",
+    progress_callback: Callable[[str], None] | None = None,
 ) -> ImportResult:
+    if progress_callback:
+        progress_callback("Reading Excel workbook…")
     return _import_dataframe(
         db,
         pd.read_excel(xlsx_path),
@@ -92,6 +100,7 @@ def import_xlsx_file(
         chart_type,
         country,
         Path(xlsx_path).name,
+        progress_callback,
     )
 
 
@@ -103,9 +112,12 @@ def _import_dataframe(
     chart_type: str,
     country: str,
     file_name: str,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> ImportResult:
     chart_type = DatabaseManager.normalize_chart_type(chart_type) or "daily"
     country = DatabaseManager.normalize_country(country) or "US"
+    if source_name.strip().upper() == "DEMO / SYNTHETIC":
+        raise ValueError("'DEMO / SYNTHETIC' is reserved for the isolated generated demo fixture.")
 
     columns = [str(column) for column in df.columns]
     date_col = _resolve_column(columns, ["date", "chartdate", "datevalue"])
@@ -124,6 +136,8 @@ def _import_dataframe(
             "A valid CSV/XLSX file must include date, track name, artist names, and streams columns."
         )
 
+    if progress_callback:
+        progress_callback(f"Validating and importing {len(df):,} chart rows…")
     valid_rows = rejected_rows = duplicates_skipped = 0
     rejected_details: list[str] = []
 
@@ -132,6 +146,10 @@ def _import_dataframe(
         batch_id = db.create_batch(source_name, source_license, chart_type, country)
 
         for row_number, (_, row) in enumerate(df.iterrows(), start=2):
+            if progress_callback and (row_number == 2 or (row_number - 2) % 500 == 0):
+                progress_callback(
+                    f"Validating row {row_number - 1:,} of {len(df):,}…"
+                )
             metadata = row.to_dict()
             chart_date = _parse_date(metadata.get(date_col))
             track_name = _as_text(metadata.get(track_col))
@@ -207,6 +225,8 @@ def _import_dataframe(
             db.upsert_artist(f"artist::{artist_names}", artist_names)
             valid_rows += 1
 
+    if progress_callback:
+        progress_callback("Chart import transaction committed.")
     result = ImportResult(
         batch_id=batch_id,
         source_name=source_name,
