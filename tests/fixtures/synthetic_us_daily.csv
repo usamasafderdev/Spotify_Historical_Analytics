@@ -1,0 +1,10 @@
+Date,Track Name,Artist,Streams,URL,Region,Position,Chart
+2024-01-01,Song A,Artist One,10000,https://open.spotify.com/track/aaa,US,1,daily
+2024-01-01,Song B,Artist Two,9000,https://open.spotify.com/track/bbb,US,2,daily
+2024-01-02,Song A,Artist One,12000,https://open.spotify.com/track/aaa,US,1,daily
+2024-01-02,Song C,Artist Three,7000,https://open.spotify.com/track/ccc,CA,3,daily
+2024-01-03,Song D,Artist Four,-100,https://open.spotify.com/track/ddd,US,5,daily
+2024-01-03,Song A,Artist One,12000,https://open.spotify.com/track/aaa,US,1,daily
+2024-01-04,Song B,Artist Two,6500,https://open.spotify.com/track/bbb,US,2,daily
+2024-01-05,Song E,Artist Five,11000,https://open.spotify.com/track/eee,US,3,weekly
+2024-01-04,Song B,Artist Two,6500,https://open.spotify.com/track/bbb,US,2,daily
