@@ -104,104 +104,108 @@ def _import_dataframe(
     country: str,
     file_name: str,
 ) -> ImportResult:
-    db.ensure_source(source_name, source_license, f"Imported from {file_name}")
-    batch_id = db.create_batch(source_name, source_license, chart_type, country)
+    chart_type = DatabaseManager.normalize_chart_type(chart_type) or "daily"
+    country = DatabaseManager.normalize_country(country) or "US"
 
     columns = [str(column) for column in df.columns]
     date_col = _resolve_column(columns, ["date", "chartdate", "datevalue"])
     track_col = _resolve_column(columns, ["trackname", "track", "title", "song"])
     artist_col = _resolve_column(columns, ["artist", "artistnames", "artist_name", "artists"])
     position_col = _resolve_column(columns, ["position", "rank"])
-    streams_col = _resolve_column(columns, ["streams", "stream", "totalstreams"])
+    streams_col = _resolve_column(columns, ["streams", "stream", "totalstreams", "total_streams"])
     url_col = _resolve_column(columns, ["url", "uri", "spotifyid", "spotify_url"])
     region_col = _resolve_column(columns, ["region", "country", "market"])
     weekly_start_col = _resolve_column(columns, ["weeklystart", "weekstart", "week_start"])
     weekly_end_col = _resolve_column(columns, ["weeklyend", "weekend", "week_end"])
-    chart_col = _resolve_column(columns, ["chart", "chartname"]) if "chart" else None
+    chart_col = _resolve_column(columns, ["chart", "chartname"])
 
     if not all([date_col, track_col, artist_col, streams_col]):
         raise ValueError(
             "A valid CSV/XLSX file must include date, track name, artist names, and streams columns."
         )
 
-    total_rows = 0
-    valid_rows = 0
-    rejected_rows = 0
-    duplicates_skipped = 0
+    valid_rows = rejected_rows = duplicates_skipped = 0
     rejected_details: list[str] = []
 
-    for row_number, row in df.iterrows():
-        total_rows += 1
-        metadata = row.to_dict()
-        chart_date = _parse_date(metadata.get(date_col))
-        track_name = _as_text(metadata.get(track_col))
-        artist_names = _as_text(metadata.get(artist_col))
-        streams_value = _as_int(metadata.get(streams_col))
-        region_name = _as_text(metadata.get(region_col)) if region_col else country
-        position_value = _as_int(metadata.get(position_col)) if position_col else None
-        original_url = _as_text(metadata.get(url_col)) if url_col else None
-        weekly_start = _parse_date(metadata.get(weekly_start_col)) if weekly_start_col else None
-        weekly_end = _parse_date(metadata.get(weekly_end_col)) if weekly_end_col else None
-        chart_value = _as_text(metadata.get(chart_col)) if chart_col else chart_type
+    with db.transaction():
+        db.ensure_source(source_name, source_license, f"Imported from {file_name}")
+        batch_id = db.create_batch(source_name, source_license, chart_type, country)
 
-        if not chart_date:
-            rejected_rows += 1
-            rejected_details.append(f"row {row_number + 2}: invalid date")
-            continue
-        if not track_name or not artist_names:
-            rejected_rows += 1
-            rejected_details.append(f"row {row_number + 2}: missing track or artist")
-            continue
-        if streams_value is None or streams_value <= 0:
-            rejected_rows += 1
-            rejected_details.append(f"row {row_number + 2}: invalid stream count")
-            continue
-        if region_name and region_name.upper() != "US" and region_name.upper() != "USA" and region_name.upper() != "UNITED STATES":
-            rejected_rows += 1
-            rejected_details.append(f"row {row_number + 2}: non-US region {region_name}")
-            continue
-        if chart_value and chart_value.lower() not in {"daily", "weekly", "top200", "viral"}:
-            rejected_rows += 1
-            rejected_details.append(f"row {row_number + 2}: unsupported chart category")
-            continue
-        if chart_value and chart_type.lower() != chart_value.lower():
-            rejected_rows += 1
-            rejected_details.append(f"row {row_number + 2}: chart category mismatch ({chart_value} vs {chart_type})")
-            continue
+        for row_number, (_, row) in enumerate(df.iterrows(), start=2):
+            metadata = row.to_dict()
+            chart_date = _parse_date(metadata.get(date_col))
+            track_name = _as_text(metadata.get(track_col))
+            artist_names = _as_text(metadata.get(artist_col))
+            streams_value = _as_int(metadata.get(streams_col))
+            region_name = _as_text(metadata.get(region_col)) if region_col else country
+            region_key = DatabaseManager.normalize_country(region_name) or country
+            position_value = _as_int(metadata.get(position_col)) if position_col else None
+            original_url = _as_text(metadata.get(url_col)) if url_col else None
+            weekly_start = _parse_date(metadata.get(weekly_start_col)) if weekly_start_col else None
+            weekly_end = _parse_date(metadata.get(weekly_end_col)) if weekly_end_col else None
+            chart_value = _as_text(metadata.get(chart_col)) if chart_col else chart_type
 
-        track_id = _as_text(metadata.get(url_col)) if url_col else f"{track_name}|{artist_names}"
-        if track_id == "":
-            track_id = f"{track_name}|{artist_names}"
-        if "spotify.com/track/" in track_id:
-            track_id = track_id.split("spotify.com/track/")[-1].split("?")[0]
+            if not chart_date:
+                rejected_rows += 1
+                rejected_details.append(f"row {row_number}: invalid date")
+                continue
+            if not track_name or not artist_names:
+                rejected_rows += 1
+                rejected_details.append(f"row {row_number}: missing track or artist")
+                continue
+            if streams_value is None or streams_value <= 0:
+                rejected_rows += 1
+                rejected_details.append(f"row {row_number}: invalid stream count")
+                continue
+            if region_key and region_key != "US":
+                rejected_rows += 1
+                rejected_details.append(f"row {row_number}: non-US region {region_name}")
+                continue
+            normalized_chart_value = DatabaseManager.normalize_chart_type(chart_value)
+            if chart_value and normalized_chart_value not in {"daily", "weekly", "top200", "viral"}:
+                rejected_rows += 1
+                rejected_details.append(f"row {row_number}: unsupported chart category")
+                continue
+            if chart_value and chart_type != normalized_chart_value:
+                rejected_rows += 1
+                rejected_details.append(f"row {row_number}: chart category mismatch ({chart_value} vs {chart_type})")
+                continue
 
-        duplicate_exists = db.connection.execute(
-            "SELECT 1 FROM chart_records WHERE source = ? AND chart_type = ? AND country = ? AND chart_date = ? AND position = ? AND track_name = ? AND artist_names = ? AND streams = ? LIMIT 1",
-            (source_name, chart_type, country, chart_date, position_value, track_name, artist_names, streams_value),
-        ).fetchone()
-        if duplicate_exists:
-            duplicates_skipped += 1
-            continue
+            track_id = _as_text(metadata.get(url_col)) if url_col else f"{track_name}|{artist_names}"
+            if track_id == "":
+                track_id = f"{track_name}|{artist_names}"
+            if track_id.startswith("spotify:track:"):
+                track_id = track_id.rsplit(":", 1)[-1]
+            elif "open.spotify.com/track/" in track_id:
+                track_id = track_id.split("open.spotify.com/track/")[-1].split("?", 1)[0].rstrip("/")
 
-        db.register_chart_record(
-            batch_id=batch_id,
-            source=source_name,
-            source_license=source_license,
-            chart_type=chart_type,
-            country=country,
-            chart_date=chart_date,
-            weekly_start=weekly_start,
-            weekly_end=weekly_end,
-            position=position_value,
-            track_id=track_id,
-            track_name=track_name,
-            artist_names=artist_names,
-            streams=streams_value,
-            original_url=original_url,
-        )
-        db.upsert_track(track_id, track_name, artist_names, source_name)
-        db.upsert_artist(f"artist::{artist_names}", artist_names)
-        valid_rows += 1
+            duplicate_exists = db.connection.execute(
+                "SELECT 1 FROM chart_records WHERE source = ? AND chart_type = ? AND country = ? AND chart_date = ? AND position IS ? AND track_name = ? AND artist_names = ? AND streams = ? LIMIT 1",
+                (source_name, chart_type, country, chart_date, position_value, track_name, artist_names, streams_value),
+            ).fetchone()
+            if duplicate_exists:
+                duplicates_skipped += 1
+                continue
+
+            db.register_chart_record(
+                batch_id=batch_id,
+                source=source_name,
+                source_license=source_license,
+                chart_type=chart_type,
+                country=country,
+                chart_date=chart_date,
+                weekly_start=weekly_start,
+                weekly_end=weekly_end,
+                position=position_value,
+                track_id=track_id,
+                track_name=track_name,
+                artist_names=artist_names,
+                streams=streams_value,
+                original_url=original_url,
+            )
+            db.upsert_track(track_id, track_name, artist_names, source_name)
+            db.upsert_artist(f"artist::{artist_names}", artist_names)
+            valid_rows += 1
 
     result = ImportResult(
         batch_id=batch_id,
@@ -209,7 +213,7 @@ def _import_dataframe(
         source_license=source_license,
         chart_type=chart_type,
         country=country,
-        total_rows=total_rows,
+        total_rows=len(df),
         valid_rows=valid_rows,
         rejected_rows=rejected_rows,
         duplicates_skipped=duplicates_skipped,

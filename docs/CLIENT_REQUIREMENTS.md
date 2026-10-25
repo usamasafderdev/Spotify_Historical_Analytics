@@ -24,3 +24,9 @@ Build a professional Windows desktop analytics application for a client analyzin
 
 ## Delivery expectations
 The project must provide an initial working Windows app foundation with a documented data model, validation rules, and a real command-line/testable implementation. The app should not misrepresent historical data as complete when the underlying source is partial or unavailable.
+
+## Phase 2 implementation status
+- Implemented: native dashboard navigation, shared date/chart filters, real-data KPIs and charts, searchable/sortable song rankings, song details, credited-artist aggregates, source inventory, observed coverage reporting, import feedback, and backup.
+- Explicitly unavailable: album analytics, because chart imports do not contain verified album mappings.
+- Limitations: coverage is observational and unverified; GUI import is synchronous; normal Windows desktop visual review is still required.
+- Verification: `python -m pytest -q` includes analytics regressions and an offscreen Qt widget/navigation smoke test.
