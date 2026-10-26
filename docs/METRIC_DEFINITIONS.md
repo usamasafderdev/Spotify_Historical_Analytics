@@ -27,6 +27,9 @@ These are derived from imported chart observations and are not official Spotify 
 - Duplicates are removed by import-time validation and database uniqueness rules. Imports without a position column use explicit duplicate matching as well.
 - Track IDs are the preferred identity; title and credited artist are used as the conservative fallback when an ID is unavailable.
 - Unknown artist or album metadata must not be guessed silently.
+- The Data Sources & Coverage page counts only exact `id_match` relationships as resolved artist/album mappings. Mapping coverage is distinct track IDs with a mapping divided by distinct chart track IDs; collaborator relationships do not multiply the denominator.
+- Research candidate files and staging databases are not included in production KPIs or coverage inventory. Their status is `RESEARCH ONLY`, separate from `UNVERIFIED` production source rights.
+- Dhruvil Viral 50 is preserved as a separate chart category and has no stream metric in the canonical adapter. Do not coerce popularity, trend, rank, or missing Viral 50 values into streams.
 - A `DEMO / SYNTHETIC` dataset is excluded from the real-data metrics review and must be visually labeled.
 - The synthetic preview uses a separate temporary SQLite database. Synthetic values are visible only while explicitly in demo mode and are never merged into production queries, backups, or exports.
 - Rankings exports use the same USA/chart/date/search ranking query and selected Top 50/100/200 limit as the on-screen result set. Exports include the metric definition, active date interval, chart type, observed coverage, and overlapping real source names and attribution notes.

@@ -59,3 +59,7 @@ Never infer artist/album identity from similar names. Unmapped album observation
 ## Before commercial use
 
 Obtain and document: the exact source and version; authorization to acquire and retain it; permitted processing and derived analytics; commercial-use rights; redistribution/export rights for both raw and derived data; any attribution or deletion requirements; market and metric definitions; verified coverage years; validation methods; and written review of the Spotify policy implications. Then import a controlled sample, reconcile it against the provider's documented semantics, and report actual observed coverage without claiming completeness unless independently evidenced.
+
+## Phase 7 status
+
+Read-only chunked MGD+ and Dhruvil adapters now validate the verified source schemas and preserve file/hash/row provenance. The research-staging approval record now requires acquisition, derived-analytics, commercial-use, and redistribution scope assertions plus an existing documentary evidence file; its digest is retained. This is a review/evidence-recording gate, not independent legal verification. No current research source was approved, staged into production, or bundled by this implementation. See [PHASE_7_IMPLEMENTATION.md](./PHASE_7_IMPLEMENTATION.md) and [DATA_IMPORT_ACCEPTANCE.md](./DATA_IMPORT_ACCEPTANCE.md).

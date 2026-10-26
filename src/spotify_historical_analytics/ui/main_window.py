@@ -69,12 +69,12 @@ COLORS = {
 }
 
 PAGES = [
-    ("Overview", "◉", "overview"),
-    ("Top Songs", "♫", "songs"),
-    ("Top Artists", "♙", "artists"),
-    ("Top Albums", "▤", "albums"),
-    ("Data Sources & Coverage", "▦", "coverage"),
-    ("Settings", "⚙", "settings"),
+    ("Overview", "O", "overview"),
+    ("Top Songs", "S", "songs"),
+    ("Top Artists", "A", "artists"),
+    ("Top Albums", "L", "albums"),
+    ("Data Sources & Coverage", "D", "coverage"),
+    ("Settings", "T", "settings"),
 ]
 
 
@@ -337,6 +337,7 @@ class MainWindow(QMainWindow):
             QComboBox QAbstractItemView {{ background:#121823; selection-background-color:{COLORS['accent']}; }}
             QTableWidget {{ background:{COLORS['card']}; alternate-background-color:#202938; gridline-color:{COLORS['border']}; border:1px solid {COLORS['border']}; border-radius:8px; selection-background-color:#42316B; }}
             QHeaderView::section {{ background:#202938; color:{COLORS['muted']}; border:0; border-bottom:1px solid {COLORS['border']}; padding:9px; font-weight:600; }}
+            QTableCornerButton::section {{ background:#202938; border:0; border-bottom:1px solid {COLORS['border']}; }}
             QToolTip {{ background:#202938; color:{COLORS['text']}; border:1px solid {COLORS['border']}; padding:6px; }}
             """
         )
@@ -583,6 +584,7 @@ class MainWindow(QMainWindow):
         self.songs_table.setAlternatingRowColors(True)
         self.songs_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.songs_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.songs_table.verticalHeader().hide()
         self.songs_table.setSortingEnabled(True)
         self.songs_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.songs_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -632,6 +634,7 @@ class MainWindow(QMainWindow):
         self.artist_table.setAlternatingRowColors(True)
         self.artist_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.artist_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.artist_table.verticalHeader().hide()
         self.artist_table.setSortingEnabled(True)
         self.artist_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.artist_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -679,6 +682,7 @@ class MainWindow(QMainWindow):
         self.album_table.setAlternatingRowColors(True)
         self.album_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.album_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.album_table.verticalHeader().hide()
         self.album_table.setSortingEnabled(True)
         self.album_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.album_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -725,16 +729,35 @@ class MainWindow(QMainWindow):
         self.coverage_summary.setWordWrap(True)
         layout.addWidget(self.coverage_summary)
         layout.addWidget(QLabel("Import sources and observed date ranges"))
-        self.source_table = QTableWidget(0, 8)
-        self.source_table.setHorizontalHeaderLabels(["Source", "Chart", "Market", "Rows", "Earliest", "Latest", "Data type", "License / rights note"])
+        self.source_table = QTableWidget(0, 13)
+        self.source_table.setHorizontalHeaderLabels(
+            [
+                "Source",
+                "Chart",
+                "Market",
+                "Observed rows",
+                "Valid streams",
+                "Unique track IDs",
+                "Artist mappings",
+                "Album mappings",
+                "First date",
+                "Last date",
+                "Rights status",
+                "Import status",
+                "License / provenance",
+            ]
+        )
         self.source_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.source_table.verticalHeader().hide()
         self.source_table.setAlternatingRowColors(True)
-        self.source_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.source_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.source_table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         layout.addWidget(self.source_table)
         layout.addWidget(QLabel("Coverage by year — completeness is unverified"))
         self.year_table = QTableWidget(0, 5)
         self.year_table.setHorizontalHeaderLabels(["Year", "Chart", "Observed dates", "Rows", "Assessment"])
         self.year_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.year_table.verticalHeader().hide()
         self.year_table.setAlternatingRowColors(True)
         self.year_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.year_table)
@@ -1563,19 +1586,28 @@ class MainWindow(QMainWindow):
         self.coverage_summary.setText(
             f"Real rows: {int(summary['real_rows'] or 0):,} · Synthetic rows: {int(summary['demo_rows'] or 0):,} · "
             f"Real data range: {summary['earliest_real'] or '—'} to {summary['latest_real'] or '—'}. "
-            "All annual status values are unverified; observation counts do not prove complete source coverage."
+            "Imported source rights are UNVERIFIED unless independently reviewed. "
+            "Research staging is RESEARCH ONLY and is not queried or imported here. "
+            "Missing dates are candidates, not zero activity; observed dates do not prove archive completeness."
         )
         self.source_table.setRowCount(0)
         for index, source in enumerate(inventory["sources"]):
             self.source_table.insertRow(index)
+            track_count = int(source["unique_track_ids"] or 0)
+            is_demo = bool(source["is_demo"])
             values = [
                 source["source"],
                 source["chart_type"],
                 source["country"],
                 f"{source['row_count']:,}",
+                f"{int(source['valid_stream_rows'] or 0):,}",
+                f"{int(source['unique_track_ids'] or 0):,}",
+                f"{int(source['artist_mapped_track_ids'] or 0):,}/{track_count:,}",
+                f"{int(source['album_mapped_track_ids'] or 0):,}/{track_count:,}",
                 source["earliest"] or "—",
                 source["latest"] or "—",
-                "Synthetic demo" if source["is_demo"] else "User supplied",
+                "N/A (synthetic)" if is_demo else "UNVERIFIED",
+                "DEMO" if is_demo else "IMPORTED",
                 source["source_license"] or "Not recorded",
             ]
             for col, value in enumerate(values):
@@ -1589,9 +1621,14 @@ class MainWindow(QMainWindow):
                 "Metadata",
                 "—",
                 f"{metadata_import['imported_rows']:,}/{metadata_import['total_rows']:,} accepted",
+                "—",
+                "—",
+                "—",
+                "—",
                 timestamp,
                 timestamp,
-                f"Rejected {metadata_import['rejected_rows']:,}; duplicates {metadata_import['duplicates_skipped']:,}",
+                "UNVERIFIED",
+                "IMPORTED",
                 metadata_import["source_license"],
             ]
             for col, value in enumerate(values):
@@ -1599,9 +1636,7 @@ class MainWindow(QMainWindow):
             source_index += 1
         self.year_table.setRowCount(0)
         by_year_type = {(row["year"], row["chart_type"]): row for row in inventory["years"]}
-        latest_year = max(
-            [int(row["year"]) for row in inventory["years"]] + [date.today().year, 2017]
-        )
+        latest_year = 2026
         chart_types = {"daily", "weekly"}
         chart_types.update(row["chart_type"] for row in inventory["years"])
         index = 0
@@ -1613,7 +1648,9 @@ class MainWindow(QMainWindow):
                     chart_type,
                     str(year["dates_with_data"]) if year else "0",
                     str(year["row_count"]) if year else "0",
-                    "Unverified (observed)" if year else "No imported observations",
+                    "OBSERVED — completeness unverified"
+                    if year
+                    else "No imported observations (not zero activity)",
                 ]
                 self.year_table.insertRow(index)
                 for col, value in enumerate(values):

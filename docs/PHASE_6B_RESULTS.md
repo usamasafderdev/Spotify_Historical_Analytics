@@ -84,7 +84,7 @@ The US song metadata has `song_id`, `artist_id`, `release_date`, and a `total_st
 
 ### Cross-source key comparison
 
-For the Dhruvil v85 date span, comparison used only `(chart_date, track_id, position)` and compared the stream value for shared keys. It did not sum sources or establish source precedence.
+For the Dhruvil v85 date span, comparison identity is `(market, chart_type, chart_date, track_id)`; rank and streams are compared as observation fields. Duplicate rows are not summed and neither source is selected as authoritative.
 
 | Year | Dhruvil unique Top 200 keys | MGD+ unique keys | Shared keys with same streams |
 |---:|---:|---:|---:|
@@ -94,7 +94,7 @@ For the Dhruvil v85 date span, comparison used only `(chart_date, track_id, posi
 | 2020 | 73,200 | 73,200 | 73,200 |
 | 2021 | 72,600 | 73,000 | 72,600 |
 
-Across 2017–2021, 363,785 keys were shared and all 363,785 had matching stream values; 399 Dhruvildave keys and 415 MGD+ keys were unmatched within that period. The 2022 MGD+ rows are outside Dhruvildave v85's observed date span. Exact overlap supports technical consistency for matched rows only; the sources may not be independent and this does not establish correctness, completeness, or legal permission.
+Across 2017–2021, 363,785 identities were shared and all 363,785 had matching rank and stream values; 399 Dhruvildave identities and 415 MGD+ identities were unmatched within that period. The 2022 MGD+ rows are outside Dhruvildave v85's observed date span. Exact overlap supports technical consistency for matched rows only; the sources may not be independent and this does not establish correctness, completeness, or legal permission. The detailed refreshed results, including stable-artist-ID coverage and limitations, are in [MGDPLUS_VALIDATION_REPORT.md](./MGDPLUS_VALIDATION_REPORT.md) and [MGDPLUS_COMPARISON_REPORT.md](./MGDPLUS_COMPARISON_REPORT.md).
 
 ## Machine reports and remaining limitations
 

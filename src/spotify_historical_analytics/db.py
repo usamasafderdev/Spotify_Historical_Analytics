@@ -178,6 +178,9 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_chart_records_market_type_date ON chart_records(country, chart_type, chart_date);
             CREATE INDEX IF NOT EXISTS idx_chart_records_filter_source ON chart_records(country, chart_type, source, chart_date);
             CREATE INDEX IF NOT EXISTS idx_chart_records_artist ON chart_records(country, chart_type, artist_names, chart_date);
+            CREATE INDEX IF NOT EXISTS idx_chart_records_real_analytics
+                ON chart_records(country, chart_type, source, chart_date, artist_names, track_id, streams, position, track_name)
+                WHERE source <> 'DEMO / SYNTHETIC';
             """
         )
         self._add_missing_columns(
@@ -379,18 +382,15 @@ class DatabaseManager:
                 COALESCE(SUM(streams), 0) AS total_streams,
                 COUNT(DISTINCT CASE WHEN track_id IS NULL THEN track_name || '|' || artist_names ELSE track_id END) AS total_tracks,
                 COUNT(DISTINCT artist_names) AS total_artists,
-                COUNT(DISTINCT chart_date) AS chart_dates_with_data
+                COUNT(DISTINCT chart_date) AS chart_dates_with_data,
+                MIN(chart_date) AS earliest,
+                MAX(chart_date) AS latest
             FROM chart_records
             WHERE {where_clause}
         """
         total_row = self.connection.execute(totals_sql, params).fetchone()
-
-        bounds = self.connection.execute(
-            f"SELECT MIN(chart_date) AS earliest, MAX(chart_date) AS latest FROM chart_records WHERE {where_clause}",
-            params,
-        ).fetchone()
-        range_start = start_date or (bounds["earliest"] if bounds else None)
-        range_end = end_date or (bounds["latest"] if bounds else None)
+        range_start = start_date or total_row["earliest"]
+        range_end = end_date or total_row["latest"]
         coverage = 0.0
         if range_start and range_end:
             start_dt = date.fromisoformat(range_start)
@@ -489,7 +489,7 @@ class DatabaseManager:
                     COALESCE(a.artist_name, '[Unlabeled artist ID]') AS artist_name,
                     SUM(c.streams) AS charting_song_streams,
                     COUNT(DISTINCT COALESCE(c.track_id, c.track_name || '|' || c.artist_names)) AS track_count,
-                    COUNT(DISTINCT c.id) AS chart_appearances,
+                    COUNT(*) AS chart_appearances,
                     MIN(c.position) AS best_position,
                     MIN(c.chart_date) AS first_appearance,
                     MAX(c.chart_date) AS latest_appearance,
@@ -510,7 +510,7 @@ class DatabaseManager:
                     c.artist_names AS artist_name,
                     SUM(c.streams) AS charting_song_streams,
                     COUNT(DISTINCT COALESCE(c.track_id, c.track_name || '|' || c.artist_names)) AS track_count,
-                    COUNT(DISTINCT c.id) AS chart_appearances,
+                    COUNT(*) AS chart_appearances,
                     MIN(c.position) AS best_position,
                     MIN(c.chart_date) AS first_appearance,
                     MAX(c.chart_date) AS latest_appearance,
@@ -562,7 +562,7 @@ class DatabaseManager:
                            COALESCE(a.artist_name, '[Unlabeled artist ID]') AS artist_name,
                            SUM(c.streams) AS charting_song_streams,
                            COUNT(DISTINCT COALESCE(c.track_id, c.track_name || '|' || c.artist_names)) AS track_count,
-                           COUNT(DISTINCT c.id) AS chart_appearances,
+                           COUNT(*) AS chart_appearances,
                            MIN(c.position) AS best_position,
                            MIN(c.chart_date) AS first_appearance,
                            MAX(c.chart_date) AS latest_appearance,
@@ -587,7 +587,7 @@ class DatabaseManager:
                            NULL AS artist_id, c.artist_names AS artist_name,
                            SUM(c.streams) AS charting_song_streams,
                            COUNT(DISTINCT COALESCE(c.track_id, c.track_name || '|' || c.artist_names)) AS track_count,
-                           COUNT(DISTINCT c.id) AS chart_appearances,
+                           COUNT(*) AS chart_appearances,
                            MIN(c.position) AS best_position,
                            MIN(c.chart_date) AS first_appearance,
                            MAX(c.chart_date) AS latest_appearance,
@@ -639,7 +639,7 @@ class DatabaseManager:
         rows = self.connection.execute(
             f"""
                 SELECT c.chart_date, SUM(c.streams) AS streams,
-                       COUNT(DISTINCT c.id) AS chart_appearances
+                       COUNT(*) AS chart_appearances
                 FROM chart_records c
                 WHERE {" AND ".join(filters)} AND {identity_filter}
                 GROUP BY c.chart_date ORDER BY c.chart_date
@@ -679,7 +679,7 @@ class DatabaseManager:
                        COALESCE(al.album_artist, '') AS album_artist,
                        SUM(c.streams) AS charting_track_streams,
                        COUNT(DISTINCT c.track_id) AS mapped_track_count,
-                       COUNT(DISTINCT c.id) AS chart_appearances,
+                       COUNT(*) AS chart_appearances,
                        MIN(c.position) AS best_position,
                        MIN(c.chart_date) AS first_appearance,
                        MAX(c.chart_date) AS latest_appearance
@@ -724,7 +724,7 @@ class DatabaseManager:
                 SELECT al.album_id, al.album_name, al.album_artist, al.release_date,
                        SUM(c.streams) AS charting_track_streams,
                        COUNT(DISTINCT c.track_id) AS mapped_track_count,
-                       COUNT(DISTINCT c.id) AS chart_appearances,
+                       COUNT(*) AS chart_appearances,
                        MIN(c.position) AS best_position,
                        MIN(c.chart_date) AS first_appearance,
                        MAX(c.chart_date) AS latest_appearance
@@ -767,7 +767,7 @@ class DatabaseManager:
                 SELECT c.track_id, MIN(c.track_name) AS track_name,
                        MIN(c.artist_names) AS artist_names,
                        SUM(c.streams) AS charting_track_streams,
-                       COUNT(DISTINCT c.id) AS chart_appearances,
+                       COUNT(*) AS chart_appearances,
                        MIN(c.position) AS best_position
                 FROM chart_records c
                 JOIN track_albums ta ON ta.track_id = c.track_id
@@ -806,7 +806,7 @@ class DatabaseManager:
         rows = self.connection.execute(
             f"""
                 SELECT c.chart_date, SUM(c.streams) AS streams,
-                       COUNT(DISTINCT c.id) AS chart_appearances
+                       COUNT(*) AS chart_appearances
                 FROM chart_records c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 WHERE {" AND ".join(filters)}
@@ -850,9 +850,9 @@ class DatabaseManager:
         rows = self.connection.execute(dates_sql, params).fetchall()
         if not rows:
             return {"earliest": None, "latest": None, "missing_dates": []}
-        coverage_dates = [row["chart_date"] for row in rows]
-        earliest = coverage_dates[0]
-        latest = coverage_dates[-1]
+        coverage_dates = {row["chart_date"] for row in rows}
+        earliest = min(coverage_dates)
+        latest = max(coverage_dates)
         missing = []
         start = date.fromisoformat(earliest)
         end = date.fromisoformat(latest)
@@ -938,13 +938,25 @@ class DatabaseManager:
         ).fetchone()
         source_rows = self.connection.execute(
             """
-                SELECT source, source_license, chart_type, country,
-                       COUNT(*) AS row_count, MIN(chart_date) AS earliest,
-                       MAX(chart_date) AS latest,
-                       MAX(CASE WHEN source = 'DEMO / SYNTHETIC' THEN 1 ELSE 0 END) AS is_demo
-                FROM chart_records
-                GROUP BY source, source_license, chart_type, country
-                ORDER BY source, chart_type, country
+                SELECT c.source, c.source_license, c.chart_type, c.country,
+                       COUNT(*) AS row_count,
+                       SUM(CASE WHEN c.streams IS NOT NULL AND c.streams >= 0 THEN 1 ELSE 0 END)
+                           AS valid_stream_rows,
+                       COUNT(DISTINCT c.track_id) AS unique_track_ids,
+                       COUNT(DISTINCT CASE WHEN EXISTS (
+                           SELECT 1 FROM track_artists ta
+                           WHERE ta.track_id = c.track_id AND ta.mapping_status = 'id_match'
+                       ) THEN c.track_id END) AS artist_mapped_track_ids,
+                       COUNT(DISTINCT CASE WHEN EXISTS (
+                           SELECT 1 FROM track_albums tal
+                           WHERE tal.track_id = c.track_id AND tal.mapping_status = 'id_match'
+                       ) THEN c.track_id END) AS album_mapped_track_ids,
+                       MIN(c.chart_date) AS earliest,
+                       MAX(c.chart_date) AS latest,
+                       MAX(CASE WHEN c.source = 'DEMO / SYNTHETIC' THEN 1 ELSE 0 END) AS is_demo
+                FROM chart_records c
+                GROUP BY c.source, c.source_license, c.chart_type, c.country
+                ORDER BY c.source, c.chart_type, c.country
             """
         ).fetchall()
         year_source_filter = "" if include_demo else " AND source <> 'DEMO / SYNTHETIC'"
@@ -973,6 +985,7 @@ class DatabaseManager:
             "sources": [dict(row) for row in source_rows],
             "years": [dict(row) for row in year_rows],
             "metadata_imports": [dict(row) for row in metadata_rows],
+            "research_sources": [],
         }
 
     def get_chart_type_availability(self, include_demo: bool = False) -> list[str]:

@@ -1006,17 +1006,43 @@ def build_compact_staging_database(
 
 def approve_source_rights(connection: sqlite3.Connection, approval_path: Path) -> None:
     payload = json.loads(approval_path.read_text(encoding="utf-8"))
-    required = {"dataset_id", "dataset_version", "reviewed_by", "reviewed_at", "evidence_path"}
+    required = {
+        "dataset_id",
+        "dataset_version",
+        "reviewed_by",
+        "reviewed_at",
+        "evidence_path",
+        "rights_scopes",
+    }
     missing = required - payload.keys()
     if missing:
         raise ValueError(f"Approval evidence is missing fields: {', '.join(sorted(missing))}")
     if not str(payload["reviewed_by"]).strip() or not str(payload["evidence_path"]).strip():
         raise ValueError("Approval requires a reviewer and evidence reference.")
+    rights_scopes = payload["rights_scopes"]
+    required_scopes = {
+        "acquisition",
+        "derived_analytics",
+        "commercial_use",
+        "redistribution",
+    }
+    if not isinstance(rights_scopes, dict) or not required_scopes.issubset(rights_scopes):
+        raise ValueError(
+            "Approval must document acquisition, derived_analytics, commercial_use, "
+            "and redistribution rights scopes."
+        )
+    if any(rights_scopes[scope] is not True for scope in required_scopes):
+        raise PermissionError(
+            "Production import requires documented permission for acquisition, "
+            "derived analytics, commercial use, and redistribution."
+        )
     evidence = Path(payload["evidence_path"])
     if not evidence.is_absolute():
         evidence = (approval_path.parent / evidence).resolve()
     if not evidence.exists():
         raise ValueError("The cited rights evidence file does not exist.")
+    if not evidence.is_file():
+        raise ValueError("The cited rights evidence path must reference a file.")
     dataset_id = str(payload["dataset_id"])
     version = int(payload["dataset_version"])
     if connection.execute(
@@ -1041,7 +1067,17 @@ def approve_source_rights(connection: sqlite3.Connection, approval_path: Path) -
             str(evidence),
             str(payload["reviewed_by"]),
             str(payload["reviewed_at"]),
-            str(payload.get("notes", "")),
+            json.dumps(
+                {
+                    "reviewer_notes": str(payload.get("notes", "")),
+                    "rights_scopes": {
+                        scope: True for scope in sorted(required_scopes)
+                    },
+                    "evidence_sha256": sha256_file(evidence),
+                    "review_means_evidence_recorded_not_independently_verified": True,
+                },
+                sort_keys=True,
+            ),
         ),
     )
     connection.commit()

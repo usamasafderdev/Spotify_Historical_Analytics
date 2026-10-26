@@ -30,3 +30,10 @@ The project must provide an initial working Windows app foundation with a docume
 - Updated in Phase 3: functional artist rankings and details using stable IDs or whole credited-string fallback; album rankings only for user-supplied stable-ID mappings; metadata preview/mapping import; transactional background imports; and background dashboard aggregate queries.
 - Limitations: coverage is observational and unverified; source completeness and licensing are not inferred; normal Windows desktop visual review is still required.
 - Verification: `python -m pytest -q` includes attribution, mapping, migrations, rollback, worker, performance, and offscreen UI regressions.
+
+## Phase 7 implementation status
+
+- Implemented: read-only chunked MGD+ and Dhruvil schema adapters with source-file digest and row provenance; stable URL ID extraction; streamless Viral 50 separation; exact multi-artist metadata mapping; expanded production coverage inventory and 2017–2026 year display; explicit research/production boundary; and stronger evidence/scope checks for research-staging production imports.
+- Not implemented: a complete persisted 13-stage GUI import workflow or independent legal-rights verification. Manual user-file import remains user-supplied and rights-unverified, and the new adapters do not automatically stage or import source data.
+- Data status: no authorized historical real data confirmed in production; research sources remain unverified; album mappings and 2022–2026 authorized coverage are unavailable.
+- Release status: test and build commands must be run for the current worktree. Full Windows desktop DPI review, signed EXE and installer readiness are not claimed.

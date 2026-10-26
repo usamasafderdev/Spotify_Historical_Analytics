@@ -278,30 +278,26 @@ class DashboardQueryWorker(QObject):
                     chart_type=self.filters["chart_type"],
                     search=self.song_search,
                 )
-            real_summary = db.get_summary(
+            inventory = db.get_data_inventory(include_demo=self.include_demo)
+            active_summary = db.get_summary(
                 start_date=self.filters["start_date"],
                 end_date=self.filters["end_date"],
                 include_demo=self.include_demo,
                 chart_type=self.filters["chart_type"],
             )
-            demo_summary = db.get_summary(
-                start_date=self.filters["start_date"],
-                end_date=self.filters["end_date"],
-                chart_type=self.filters["chart_type"],
-                include_demo=True,
-            )
-            has_real_data = real_summary["total_streams"] > 0 and not self.include_demo
+            real_rows = int(inventory["summary"]["real_rows"] or 0)
+            demo_rows = int(inventory["summary"]["demo_rows"] or 0)
             overview = {
-                "summary": real_summary,
-                "demo_summary": demo_summary,
+                "summary": active_summary,
+                "demo_summary": active_summary if self.include_demo else None,
                 "top_tracks": all_songs[:10],
-                "has_demo_data": demo_summary["total_streams"] > 0 and not has_real_data,
-                "has_real_data": has_real_data,
+                "has_demo_data": demo_rows > 0 and real_rows == 0,
+                "has_real_data": real_rows > 0 and not self.include_demo,
             }
             result = {
                 "generation": self.generation,
                 "overview": overview,
-                "inventory": analytics.data_inventory(include_demo=self.include_demo),
+                "inventory": inventory,
                 "streams": analytics.streams_over_time(
                     **self.filters, include_demo=self.include_demo
                 ),

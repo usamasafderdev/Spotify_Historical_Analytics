@@ -22,7 +22,7 @@ from scripts.download_historical_datasets import (
     download_dataset,
     download_dataset_latest,
 )
-from scripts.audit_mgdplus_archive import audit_archive
+from scripts.audit_mgdplus_archive import _parse_metadata_ids, audit_archive
 from scripts import download_historical_datasets as downloader
 from spotify_historical_analytics.db import DatabaseManager
 from spotify_historical_analytics.research_pipeline import (
@@ -639,7 +639,7 @@ def test_chart_quality_reports_separate_calendar_gaps_and_invalid_viral_ranks(
     assert rank_samples[0]["detail"] == "viral50:rank=51"
 
 
-def test_mgdplus_archive_audit_is_research_only_and_compares_stable_chart_keys(
+def test_mgdplus_archive_audit_is_research_only_and_compares_stable_chart_identities(
     tmp_path: Path,
 ) -> None:
     archive_path = tmp_path / "MGDplus.zip"
@@ -647,6 +647,9 @@ def test_mgdplus_archive_audit_is_research_only_and_compares_stable_chart_keys(
         ["4Km5HrUvYTaSUfiSGPJeQR", "Song A", "Artist A", "1", "1,000", "0", "2017-01-01", "Top 200", "us"],
         ["4Km5HrUvYTaSUfiSGPJeQR", "Song A", "Artist A", "1", "1,000", "0", "2017-01-01", "Top 200", "us"],
         ["3n3Ppam7vgaVa1iaRUc9Lp", "Song B", "Artist B", "1", "2,000", "0", "2017-01-02", "Top 200", "us"],
+        ["market-track", "Market", "Artist", "2", "100", "0", "2017-01-02", "Top 200", "ca"],
+        ["chart-track", "Chart", "Artist", "3", "100", "0", "2017-01-02", "Viral 50", "us"],
+        ["invalid-stream-track", "Invalid", "Artist", "4", "not-count", "0", "2017-01-02", "Top 200", "us"],
     ]
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         chart_buffer = io.StringIO(newline="")
@@ -661,11 +664,12 @@ def test_mgdplus_archive_audit_is_research_only_and_compares_stable_chart_keys(
         )
         archive.writestr(
             "songs/regional/us/us-hit_songs-2017.csv",
-            "song_id\tartist_id\tsong_name\nsong-a\tartist-a\tSong A\n",
+            "song_id\tartist_id\tsong_name\n"
+            "4Km5HrUvYTaSUfiSGPJeQR\t['artist-a', 'artist-b']\tSong A\n",
         )
         archive.writestr(
             "artists/us/us-artists-2017.csv",
-            "artist_id\tname\nartist-a\tArtist A\n",
+            "artist_id\tname\nartist-a\tArtist A\nartist-b\tArtist B\n",
         )
         archive.writestr("charts/../outside.csv", "not extracted\n")
 
@@ -704,22 +708,90 @@ def test_mgdplus_archive_audit_is_research_only_and_compares_stable_chart_keys(
     assert summary["unsafe_member_path_count"] == 1
     assert summary["extraction_performed"] is False
     assert summary["production_import_performed"] is False
-    assert summary["us_chart"]["rows"] == 3
+    assert summary["us_chart"]["rows"] == 6
+    assert summary["us_chart"]["valid_us_top200_observation_rows"] == 4
+    assert summary["us_chart"]["valid_us_top200_rows_with_streams"] == 3
+    assert summary["us_chart"]["invalid_market_rows"] == 1
+    assert summary["us_chart"]["invalid_chart_type_rows"] == 1
+    assert summary["us_chart"]["invalid_stream_rows"] == 1
     assert summary["us_chart"]["distinct_dates"] == 2
     assert summary["us_chart"]["duplicate_identity_groups"] == 1
     assert summary["us_chart"]["duplicate_extra_rows"] == 1
     assert summary["us_chart"]["duplicate_identity_groups_with_stream_conflicts"] == 0
-    assert summary["us_chart"]["market_values"] == {"us": 3}
+    assert summary["us_chart"]["market_values"] == {"ca": 1, "us": 5}
+    assert summary["us_chart"]["chart_values"] == {"Top 200": 5, "Viral 50": 1}
     assert summary["viral_chart_file_present"] is False
     assert summary["metadata_members"]["artist_id_fields_found"] == ["artist_id"]
     assert summary["metadata_members"]["album_related_fields_found"] == []
-    assert summary["cross_source_comparison"]["shared_keys"] == 1
-    assert summary["cross_source_comparison"]["same_stream_keys"] == 1
+    assert summary["metadata_members"]["chart_track_ids_with_song_metadata"] == 1
+    assert summary["metadata_members"]["chart_track_ids_with_artist_id_mapping"] == 1
+    assert summary["metadata_members"]["chart_track_ids_with_multiple_artist_ids"] == 1
+    assert summary["metadata_members"]["charted_artist_ids_with_artist_metadata"] == 2
+    assert summary["cross_source_comparison"]["shared_identities"] == 1
+    assert summary["cross_source_comparison"]["matching_observations"] == 1
+    assert summary["cross_source_comparison"]["shared_distinct_track_ids"] == 1
     with (tmp_path / "mgdplus_reports" / "zenodo_mgdplus_us_chart_by_date.csv").open(
         encoding="utf-8-sig", newline=""
     ) as stream:
         dates = list(csv.DictReader(stream))
     assert len(dates) == 2
+
+
+def test_mgdplus_metadata_artist_id_lists_are_parsed_without_evaluation() -> None:
+    assert _parse_metadata_ids("['artist-a', 'artist-b']") == (
+        "artist-a",
+        "artist-b",
+    )
+    assert _parse_metadata_ids("artist-a") == ("artist-a",)
+    assert _parse_metadata_ids("") == ()
+    assert _parse_metadata_ids("__import__('os').system('whoami')") == (
+        "__import__('os').system('whoami')",
+    )
+
+
+def test_mgdplus_comparison_reports_rank_changes_as_conflicts_not_missing_identities(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "MGDplus-rank-change.zip"
+    chart_buffer = io.StringIO(newline="")
+    writer = csv.writer(chart_buffer, delimiter="\t")
+    writer.writerow(
+        ["ID", "Track", "Artist", "Position", "Streams", "Trend", "Date", "Chart", "market"]
+    )
+    writer.writerow(
+        ["track-a", "Song A", "Artist A", "1", "1,000", "0", "2017-01-01", "Top 200", "us"]
+    )
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "charts/regional/spotify_charts_regional_us.csv",
+            chart_buffer.getvalue(),
+        )
+
+    comparison_database = tmp_path / "compact-rank-change.sqlite"
+    connection = sqlite3.connect(comparison_database)
+    _initialize_staging(connection)
+    comparison_file = _write_song_file(
+        tmp_path / "charts_songs_daily.csv",
+        [["2017-01-01", "US", "top200", "2", "track-a", "Song A", "Artist A", "1000"]],
+    )
+    process_file(connection, DATASETS[1], comparison_file)
+    connection.close()
+
+    summary = audit_archive(
+        archive_path,
+        tmp_path / "rank-change-reports",
+        compact_database=comparison_database,
+        dataset_id=DATASETS[1].dataset_id,
+        dataset_version=DATASETS[1].version,
+        start_year=2017,
+        end_year=2017,
+    )
+    comparison = summary["cross_source_comparison"]
+    assert comparison["shared_identities"] == 1
+    assert comparison["matching_observations"] == 0
+    assert comparison["conflicting_observations"] == 1
+    assert comparison["dhruvil_only_identities_in_comparison_span"] == 0
+    assert comparison["mgdplus_only_identities_in_comparison_span"] == 0
 
 
 def test_report_detects_cross_source_conflicts_without_summing(
@@ -901,6 +973,52 @@ def test_permission_gate_prevents_production_import_until_evidence_is_recorded(
     app_db.close()
 
 
+def test_rights_evidence_requires_each_use_scope_and_records_evidence_hash(
+    tmp_path: Path, staging_db: sqlite3.Connection
+) -> None:
+    file_path = _write_song_file(
+        tmp_path / "charts_songs_daily.csv",
+        [["2017-01-01", "US", "top200", "1", "track-a", "Song A", "Artist A", "100"]],
+    )
+    process_file(staging_db, DATASETS[0], file_path)
+    evidence = tmp_path / "permission-review.txt"
+    evidence.write_text("Synthetic evidence fixture.", encoding="utf-8")
+    approval = tmp_path / "approval.json"
+    payload = {
+        "dataset_id": DATASETS[0].dataset_id,
+        "dataset_version": DATASETS[0].version,
+        "reviewed_by": "Test Reviewer",
+        "reviewed_at": "2026-10-26",
+        "evidence_path": evidence.name,
+        "rights_scopes": {
+            "acquisition": True,
+            "derived_analytics": True,
+            "commercial_use": False,
+            "redistribution": True,
+        },
+    }
+    approval.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(PermissionError, match="commercial use"):
+        approve_source_rights(staging_db, approval)
+    assert staging_db.execute(
+        "SELECT rights_status FROM source_rights WHERE dataset_id=? AND dataset_version=?",
+        (DATASETS[0].dataset_id, DATASETS[0].version),
+    ).fetchone()[0] == "UNVERIFIED"
+
+    payload["rights_scopes"]["commercial_use"] = True
+    approval.write_text(json.dumps(payload), encoding="utf-8")
+    approve_source_rights(staging_db, approval)
+    notes = json.loads(
+        staging_db.execute(
+            "SELECT notes FROM source_rights WHERE dataset_id=? AND dataset_version=?",
+            (DATASETS[0].dataset_id, DATASETS[0].version),
+        ).fetchone()[0]
+    )
+    assert len(notes["evidence_sha256"]) == 64
+    assert notes["review_means_evidence_recorded_not_independently_verified"] is True
+
+
 def test_approved_import_is_explicit_and_keeps_daily_stream_totals(
     tmp_path: Path, staging_db: sqlite3.Connection
 ) -> None:
@@ -923,6 +1041,12 @@ def test_approved_import_is_explicit_and_keeps_daily_stream_totals(
                 "reviewed_by": "Test Reviewer",
                 "reviewed_at": "2026-10-26",
                 "evidence_path": evidence.name,
+                "rights_scopes": {
+                    "acquisition": True,
+                    "derived_analytics": True,
+                    "commercial_use": True,
+                    "redistribution": True,
+                },
             }
         ),
         encoding="utf-8",
@@ -994,6 +1118,12 @@ def test_production_import_rolls_back_all_database_writes_on_failure(
                 "reviewed_by": "Test Reviewer",
                 "reviewed_at": "2026-10-26",
                 "evidence_path": evidence.name,
+                "rights_scopes": {
+                    "acquisition": True,
+                    "derived_analytics": True,
+                    "commercial_use": True,
+                    "redistribution": True,
+                },
             }
         ),
         encoding="utf-8",
@@ -1042,6 +1172,12 @@ def test_weekly_production_import_requires_explicit_period_boundaries(
                 "reviewed_by": "Test Reviewer",
                 "reviewed_at": "2026-10-26",
                 "evidence_path": evidence.name,
+                "rights_scopes": {
+                    "acquisition": True,
+                    "derived_analytics": True,
+                    "commercial_use": True,
+                    "redistribution": True,
+                },
             }
         ),
         encoding="utf-8",
@@ -1078,6 +1214,12 @@ def test_weekly_import_keeps_explicit_dates_and_daily_rows_separate(
                 "reviewed_by": "Test Reviewer",
                 "reviewed_at": "2026-10-26",
                 "evidence_path": evidence.name,
+                "rights_scopes": {
+                    "acquisition": True,
+                    "derived_analytics": True,
+                    "commercial_use": True,
+                    "redistribution": True,
+                },
             }
         ),
         encoding="utf-8",

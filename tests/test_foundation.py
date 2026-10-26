@@ -165,6 +165,39 @@ def test_country_aliases_are_normalized_and_invalid_ranges_rejected(tmp_path: Pa
         db.get_summary(start_date="2024-01-20", end_date="2024-01-10", chart_type="daily")
 
 
+def test_summary_uses_one_aggregate_scan_and_real_analytics_covering_index(
+    tmp_path: Path,
+) -> None:
+    db = DatabaseManager(tmp_path / "summary-plan.db")
+    statements: list[str] = []
+    db.connection.set_trace_callback(statements.append)
+
+    summary = db.get_summary(chart_type="daily")
+
+    selects = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT")
+    ]
+    assert len(selects) == 1
+    assert summary["total_streams"] == 0
+    plan = db.connection.execute(
+        """
+        EXPLAIN QUERY PLAN
+        SELECT SUM(streams), COUNT(DISTINCT track_id), COUNT(DISTINCT chart_date),
+               MIN(chart_date), MAX(chart_date)
+        FROM chart_records
+        WHERE country=? AND chart_type=? AND source<>?
+        """,
+        ("US", "daily", "DEMO / SYNTHETIC"),
+    ).fetchall()
+    assert any(
+        "idx_chart_records_real_analytics" in row["detail"] for row in plan
+    )
+    db.connection.set_trace_callback(None)
+    db.close()
+
+
 def test_date_filtering_rank_search_and_song_details(tmp_path: Path) -> None:
     db = DatabaseManager(tmp_path / "filtered.db")
     import_csv_file(db, FIXTURE_CSV, "Test Source", "Test license", chart_type="daily", country="US")
@@ -227,6 +260,12 @@ def test_coverage_inventory_and_demo_separation(tmp_path: Path) -> None:
     assert inventory["summary"]["real_rows"] == 6
     assert inventory["summary"]["demo_rows"] > 5
     assert all(year["year"] == "2024" for year in inventory["years"])
+    assert inventory["research_sources"] == []
+    source = next(item for item in inventory["sources"] if item["source"] == "Test Source")
+    assert source["valid_stream_rows"] == source["row_count"]
+    assert source["unique_track_ids"] > 0
+    assert source["artist_mapped_track_ids"] == 0
+    assert source["album_mapped_track_ids"] == 0
 
 
 def test_import_without_position_does_not_double_count_and_track_ids_merge(tmp_path: Path) -> None:

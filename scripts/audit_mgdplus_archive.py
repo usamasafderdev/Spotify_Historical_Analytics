@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import io
 import json
@@ -46,6 +47,23 @@ def _parse_streams(value: str | None) -> int | None:
     return int(normalized.replace(",", ""))
 
 
+def _parse_metadata_ids(value: str | None) -> tuple[str, ...] | None:
+    if value is None or not value.strip():
+        return ()
+    normalized = value.strip()
+    if normalized.startswith("["):
+        try:
+            parsed = ast.literal_eval(normalized)
+        except (SyntaxError, ValueError):
+            return None
+        if not isinstance(parsed, list) or not all(
+            isinstance(item, str) for item in parsed
+        ):
+            return None
+        return tuple(item.strip() for item in parsed if item.strip())
+    return (normalized,)
+
+
 def _write_csv(
     path: Path,
     fields: Sequence[str],
@@ -61,15 +79,19 @@ def _cross_source_comparison(
     database_path: Path,
     dataset_id: str,
     dataset_version: int,
-    zenodo_observations: Mapping[tuple[str, str, int], set[int]],
+    zenodo_observations: Mapping[
+        tuple[str, str, str, str], set[tuple[int, int]]
+    ],
 ) -> dict[str, Any]:
     database_uri = f"{database_path.resolve().as_uri()}?mode=ro"
     connection = sqlite3.connect(database_uri, uri=True)
     try:
-        dhruvil: dict[tuple[str, str, int], set[int]] = defaultdict(set)
-        for chart_date, track_id, position, streams in connection.execute(
+        dhruvil: dict[tuple[str, str, str, str], set[tuple[int, int]]] = defaultdict(set)
+        dhruvil_track_ids: set[str] = set()
+        for country, chart_name, chart_date, track_id, position, streams in connection.execute(
             """
-            SELECT o.chart_date, o.track_id, o.position, o.streams
+            SELECT o.country, lower(COALESCE(o.chart_name, 'top200')),
+                   o.chart_date, o.track_id, o.position, o.streams
             FROM staged_observations o
             JOIN staged_files f USING (dataset_id, dataset_version, file_sha256)
             WHERE f.status='complete' AND o.dataset_id=? AND o.dataset_version=?
@@ -79,17 +101,20 @@ def _cross_source_comparison(
             """,
             (dataset_id, dataset_version),
         ):
-            dhruvil[(chart_date, track_id, int(position))].add(int(streams))
-        shared = dhruvil.keys() & zenodo_observations.keys()
-        exact = sum(
+            dhruvil_track_ids.add(track_id)
+            dhruvil[
+                (country.upper(), chart_name.casefold(), chart_date, track_id)
+            ].add((int(position), int(streams)))
+
+        mgdplus_track_ids = {key[3] for key in zenodo_observations}
+        shared_identities = dhruvil.keys() & zenodo_observations.keys()
+        matching = sum(
             1
-            for key in shared
-            if len(dhruvil[key]) == 1
-            and len(zenodo_observations[key]) == 1
-            and dhruvil[key] == zenodo_observations[key]
+            for key in shared_identities
+            if dhruvil[key] == zenodo_observations[key]
         )
-        conflicts = len(shared) - exact
-        dhruvil_dates = [key[0] for key in dhruvil]
+        conflicts = len(shared_identities) - matching
+        dhruvil_dates = [key[2] for key in dhruvil]
         first_dhruvil_date = min(dhruvil_dates) if dhruvil_dates else None
         last_dhruvil_date = max(dhruvil_dates) if dhruvil_dates else None
         mgd_in_dhruvil_span = {
@@ -97,52 +122,66 @@ def _cross_source_comparison(
             for key, streams in zenodo_observations.items()
             if first_dhruvil_date is not None
             and last_dhruvil_date is not None
-            and first_dhruvil_date <= key[0] <= last_dhruvil_date
+            and first_dhruvil_date <= key[2] <= last_dhruvil_date
         }
         by_year: list[dict[str, Any]] = []
-        years = sorted({key[0][:4] for key in dhruvil} | {key[0][:4] for key in zenodo_observations})
+        years = sorted({key[2][:4] for key in dhruvil} | {key[2][:4] for key in zenodo_observations})
         for year in years:
-            dhruvil_year = {key: value for key, value in dhruvil.items() if key[0].startswith(year)}
+            dhruvil_year = {key: value for key, value in dhruvil.items() if key[2].startswith(year)}
             mgd_year = {
                 key: value
                 for key, value in zenodo_observations.items()
-                if key[0].startswith(year)
+                if key[2].startswith(year)
             }
             common_year = dhruvil_year.keys() & mgd_year.keys()
             same_year = sum(
                 1
                 for key in common_year
-                if len(dhruvil_year[key]) == 1
-                and len(mgd_year[key]) == 1
-                and dhruvil_year[key] == mgd_year[key]
+                if dhruvil_year[key] == mgd_year[key]
             )
             by_year.append(
                 {
                     "year": year,
-                    "dhruvil_unique_keys": len(dhruvil_year),
-                    "mgdplus_unique_keys": len(mgd_year),
-                    "shared_keys": len(common_year),
-                    "same_stream_keys": same_year,
-                    "different_or_ambiguous_stream_keys": len(common_year) - same_year,
+                    "dhruvil_unique_identities": len(dhruvil_year),
+                    "mgdplus_unique_identities": len(mgd_year),
+                    "shared_identities": len(common_year),
+                    "matching_observations": same_year,
+                    "conflicting_observations": len(common_year) - same_year,
+                    "dhruvil_only_identities": len(dhruvil_year.keys() - mgd_year.keys()),
+                    "mgdplus_only_identities": len(mgd_year.keys() - dhruvil_year.keys()),
                 }
             )
         return {
             "comparison_source": f"{dataset_id}@{dataset_version}",
-            "matching_fields": ["chart_date", "track_id", "position"],
+            "matching_identity_fields": ["market", "chart_type", "chart_date", "track_id"],
+            "compared_observation_fields": ["position", "streams"],
             "dhruvil_date_span": [first_dhruvil_date, last_dhruvil_date],
-            "dhruvil_unique_top200_keys": len(dhruvil),
-            "mgdplus_unique_top200_keys": len(zenodo_observations),
-            "mgdplus_unique_keys_in_dhruvil_date_span": len(mgd_in_dhruvil_span),
-            "shared_keys": len(shared),
-            "dhruvil_only_keys_in_comparison_span": len(dhruvil.keys() - mgd_in_dhruvil_span.keys()),
-            "mgdplus_only_keys_in_comparison_span": len(mgd_in_dhruvil_span.keys() - dhruvil.keys()),
-            "same_stream_keys": exact,
-            "different_or_ambiguous_stream_keys": conflicts,
+            "dhruvil_unique_top200_identities": len(dhruvil),
+            "mgdplus_unique_top200_identities": len(zenodo_observations),
+            "mgdplus_unique_identities_in_dhruvil_date_span": len(mgd_in_dhruvil_span),
+            "shared_identities": len(shared_identities),
+            "matching_observations": matching,
+            "conflicting_observations": conflicts,
+            "dhruvil_only_identities_in_comparison_span": len(
+                dhruvil.keys() - mgd_in_dhruvil_span.keys()
+            ),
+            "mgdplus_only_identities_in_comparison_span": len(
+                mgd_in_dhruvil_span.keys() - dhruvil.keys()
+            ),
+            "mgdplus_unique_identities_after_dhruvil_span": sum(
+                1 for key in zenodo_observations if last_dhruvil_date and key[2] > last_dhruvil_date
+            ),
+            "dhruvil_distinct_track_ids": len(dhruvil_track_ids),
+            "mgdplus_distinct_track_ids": len(mgdplus_track_ids),
+            "shared_distinct_track_ids": len(dhruvil_track_ids & mgdplus_track_ids),
+            "dhruvil_only_track_ids": len(dhruvil_track_ids - mgdplus_track_ids),
+            "mgdplus_only_track_ids": len(mgdplus_track_ids - dhruvil_track_ids),
             "by_year": by_year,
             "not_a_source_precedence_decision": True,
             "note": (
-                "Rows were compared by matching date, track ID, and rank only. "
-                "Neither source was selected as authoritative; discrepancies are not resolved."
+                "Identity uses market, chart type, date, and track ID. Rank and streams are compared "
+                "as observation values. Duplicate rows are represented as sets, not summed. "
+                "Neither source was selected as authoritative."
             ),
         }
     finally:
@@ -223,17 +262,26 @@ def audit_archive(
             member_records,
         )
         chart_info = archive.getinfo(US_CHART_MEMBER)
+        expected_rank_count = 200
         chart_counts: Counter[str] = Counter()
         market_counts: Counter[str] = Counter()
         rows_by_date: Counter[str] = Counter()
         identity_counts: Counter[tuple[str, str, int]] = Counter()
         streams_by_date_chart_position: dict[tuple[str, str, int], set[int]] = {}
         unique_ids: set[str] = set()
+        chart_stream_observations: dict[
+            tuple[str, str, str, str], set[tuple[int, int]]
+        ] = defaultdict(set)
+        year_stream_rows: Counter[int] = Counter()
         id_lengths: Counter[int] = Counter()
-        stream_missing = stream_invalid = rank_invalid = date_invalid = 0
+        stream_missing = stream_invalid = rank_invalid = rank_out_of_range = 0
+        date_invalid = market_invalid = chart_invalid = 0
         rank_values: list[int] = []
         id_missing = 0
         row_count = 0
+        valid_observation_rows = 0
+        valid_stream_observation_rows = 0
+        chart_track_ids: set[str] = set()
 
         with archive.open(chart_info) as binary:
             text = io.TextIOWrapper(binary, encoding="utf-8-sig", newline="")
@@ -259,7 +307,6 @@ def audit_archive(
                     date_invalid += 1
                     continue
                 chart_date = chart_day.isoformat()
-                rows_by_date[chart_date] += 1
 
                 raw_id = (row.get("ID") or "").strip()
                 if raw_id:
@@ -279,19 +326,66 @@ def audit_archive(
                 except ValueError:
                     rank_invalid += 1
                     continue
+                if position < 1 or position > expected_rank_count:
+                    rank_out_of_range += 1
+                    continue
+                if market.casefold() != "us":
+                    market_invalid += 1
+                    continue
+                if chart.casefold() != "top 200":
+                    chart_invalid += 1
+                    continue
+                valid_observation_rows += 1
+                rows_by_date[chart_date] += 1
+                year_stream_rows[chart_day.year] += streams is not None
+                if streams is not None:
+                    valid_stream_observation_rows += 1
                 if raw_id:
+                    chart_track_ids.add(raw_id)
                     key = (chart_date, raw_id, position)
                     identity_counts[key] += 1
                     if streams is not None:
                         streams_by_date_chart_position.setdefault(key, set()).add(streams)
+                        chart_stream_observations[
+                            ("US", "top200", chart_date, raw_id)
+                        ].add((position, streams))
 
         metadata_schemas: dict[str, list[str]] = {}
+        metadata_row_counts: dict[str, int] = {}
+        song_metadata_ids: set[str] = set()
+        song_artist_ids: dict[str, set[str]] = defaultdict(set)
+        song_metadata_missing_ids = 0
+        song_metadata_missing_artist_ids = 0
+        song_metadata_invalid_artist_ids = 0
+        artist_metadata_ids: set[str] = set()
         for member_name in [*song_metadata_members, *artist_metadata_members]:
             with archive.open(member_name) as binary:
                 text = io.TextIOWrapper(binary, encoding="utf-8-sig", newline="")
-                metadata_schemas[member_name] = next(
-                    csv.reader(text, delimiter="\t"), []
-                )
+                reader = csv.DictReader(text, delimiter="\t")
+                metadata_schemas[member_name] = reader.fieldnames or []
+                row_count_for_member = 0
+                for metadata_row in reader:
+                    row_count_for_member += 1
+                    if member_name in song_metadata_members:
+                        song_id = (metadata_row.get("song_id") or "").strip()
+                        artist_id = (metadata_row.get("artist_id") or "").strip()
+                        if song_id:
+                            song_metadata_ids.add(song_id)
+                            if artist_id:
+                                parsed_artist_ids = _parse_metadata_ids(artist_id)
+                                if parsed_artist_ids is None:
+                                    song_metadata_invalid_artist_ids += 1
+                                else:
+                                    song_artist_ids[song_id].update(parsed_artist_ids)
+                            else:
+                                song_metadata_missing_artist_ids += 1
+                        else:
+                            song_metadata_missing_ids += 1
+                    else:
+                        artist_id = (metadata_row.get("artist_id") or "").strip()
+                        if artist_id:
+                            artist_metadata_ids.add(artist_id)
+                metadata_row_counts[member_name] = row_count_for_member
 
         duplicate_groups = sum(1 for count in identity_counts.values() if count > 1)
         duplicate_extra_rows = sum(
@@ -311,7 +405,6 @@ def audit_archive(
             span_days = 0
             missing_days = set()
 
-        expected_rank_count = 200
         daily_records: list[dict[str, Any]] = []
         year_records: list[dict[str, Any]] = []
         month_records: list[dict[str, Any]] = []
@@ -335,6 +428,7 @@ def audit_archive(
                     "observed_dates": len(observed_year),
                     "calendar_missing_dates": calendar_days - len(observed_year),
                     "observations": sum(observed_year.values()),
+                    "rows_with_streams": year_stream_rows[year],
                     "incomplete_observed_dates": incomplete_dates,
                     "first_observed_date": min(observed_year) if observed_year else "",
                     "last_observed_date": max(observed_year) if observed_year else "",
@@ -401,7 +495,8 @@ def audit_archive(
             report_dir / "zenodo_mgdplus_us_chart_by_year.csv",
             (
                 "year", "calendar_days", "observed_dates", "calendar_missing_dates",
-                "observations", "incomplete_observed_dates", "first_observed_date",
+                "observations", "rows_with_streams",
+                "incomplete_observed_dates", "first_observed_date",
                 "last_observed_date", "coverage_interpretation",
             ),
             year_records,
@@ -455,6 +550,8 @@ def audit_archive(
             "delimiter": "TAB",
             "headers": headers,
             "rows": row_count,
+            "valid_us_top200_observation_rows": valid_observation_rows,
+            "valid_us_top200_rows_with_streams": valid_stream_observation_rows,
             "market_values": dict(market_counts),
             "chart_values": dict(chart_counts),
             "first_date": first_day.isoformat() if first_day else None,
@@ -466,12 +563,19 @@ def audit_archive(
             "invalid_stream_rows": stream_invalid,
             "missing_or_invalid_date_rows": date_invalid,
             "missing_track_id_rows": id_missing,
-            "distinct_track_ids": len(unique_ids),
+            "invalid_market_rows": market_invalid,
+            "invalid_chart_type_rows": chart_invalid,
+            "distinct_track_ids": len(chart_track_ids),
             "track_id_length_counts": dict(id_lengths),
             "rank_min": min(rank_values) if rank_values else None,
             "rank_max": max(rank_values) if rank_values else None,
             "rank_value_counts": dict(sorted(rank_counts.items())),
             "invalid_rank_rows": rank_invalid,
+            "out_of_range_rank_rows": rank_out_of_range,
+            "rows_with_streams_by_year": {
+                str(year): year_stream_rows[year]
+                for year in range(start_year, end_year + 1)
+            },
             "expected_top200_rank_count": expected_rank_count,
             "observed_dates_with_non_200_rows": sum(
                 1 for count in rows_by_date.values() if count != expected_rank_count
@@ -489,6 +593,31 @@ def audit_archive(
             "us_artist_metadata_member_count": len(artist_metadata_members),
             "us_artist_metadata_members": artist_metadata_members,
             "us_metadata_headers": metadata_schemas,
+            "us_metadata_data_rows": metadata_row_counts,
+            "unique_song_metadata_ids": len(song_metadata_ids),
+            "song_metadata_rows_missing_song_id": song_metadata_missing_ids,
+            "song_metadata_rows_missing_artist_id": song_metadata_missing_artist_ids,
+            "song_metadata_rows_with_invalid_artist_id": song_metadata_invalid_artist_ids,
+            "chart_track_ids_with_song_metadata": len(chart_track_ids & song_metadata_ids),
+            "chart_track_ids_without_song_metadata": len(chart_track_ids - song_metadata_ids),
+            "chart_track_ids_with_artist_id_mapping": sum(
+                bool(song_artist_ids.get(track_id)) for track_id in chart_track_ids
+            ),
+            "chart_track_ids_with_multiple_artist_ids": sum(
+                len(song_artist_ids.get(track_id, set())) > 1 for track_id in chart_track_ids
+            ),
+            "unique_artist_metadata_ids": len(artist_metadata_ids),
+            "charted_artist_ids_with_artist_metadata": len(
+                artist_metadata_ids
+                & {
+                    artist_id
+                    for track_id in chart_track_ids
+                    for artist_id in song_artist_ids.get(track_id, set())
+                }
+            ),
+            "song_metadata_total_streams_field_note": (
+                "Metadata total_streams is not a per-chart observation and is excluded from chart stream analysis."
+            ),
             "album_related_fields_found": sorted(
                 {
                     header
@@ -522,7 +651,7 @@ def audit_archive(
             compact_database,
             dataset_id,
             dataset_version,
-            streams_by_date_chart_position,
+            chart_stream_observations,
         )
     (report_dir / "zenodo_mgdplus_audit.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8"
