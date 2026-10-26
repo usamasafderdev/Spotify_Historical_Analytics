@@ -82,6 +82,19 @@ python -m pytest -q
 
 The tests include an offscreen Qt widget/navigation smoke test. It does not replace visual verification in a normal Windows desktop session.
 
+## Optional historical dataset research
+
+The client production database and Windows EXE do not require KaggleHub. To audit the two candidate Kaggle archives in a separate research directory, install the optional tools and run:
+
+```powershell
+python -m pip install -e ".[research,test]"
+python scripts/download_historical_datasets.py --download --research-root "D:\Spotify-Dataset-Research"
+```
+
+The workflow pins the reviewed dataset versions, reuses local cache entries, processes supported tabular files in chunks, and writes audit/rejection/coverage reports plus a separate research SQLite staging database. It does not assume that the Kaggle sources are USA-only or approved for commercial use, and it does not import research rows into the application's database or package them into the EXE. The source-rights state defaults to `UNVERIFIED`; an archive license, download, user upload, or attribution entry alone is not production approval.
+
+If Kaggle requires authentication, use KaggleHub's local documented login or secure credential configuration. Never put API tokens in source code, arguments, or logs. Do not bypass filesystem permissions: specify a writable `--research-root` if `D:\Spotify-Dataset-Research` cannot be created. See [docs/PHASE_6_IMPLEMENTATION.md](docs/PHASE_6_IMPLEMENTATION.md), [docs/DATASET_DISCOVERY_REPORT.md](docs/DATASET_DISCOVERY_REPORT.md), [docs/DATASET_SOURCE_COMPARISON.md](docs/DATASET_SOURCE_COMPARISON.md), [docs/HISTORICAL_DATA_COVERAGE.md](docs/HISTORICAL_DATA_COVERAGE.md), [docs/DATA_PERMISSION_STATUS.md](docs/DATA_PERMISSION_STATUS.md), and [docs/DATA_IMPORT_INSTRUCTIONS.md](docs/DATA_IMPORT_INSTRUCTIONS.md).
+
 See [docs/PHASE_2_IMPLEMENTATION.md](docs/PHASE_2_IMPLEMENTATION.md) for behavior and limitations.
 For accepted metadata columns and identity rules, see [docs/METADATA_IMPORT_GUIDE.md](docs/METADATA_IMPORT_GUIDE.md).
 For Phase 3 schema, analytics, and performance details, see [docs/PHASE_3_IMPLEMENTATION.md](docs/PHASE_3_IMPLEMENTATION.md).

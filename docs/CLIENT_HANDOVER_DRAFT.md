@@ -6,7 +6,7 @@ US Music Charts Analytics is an independent Windows desktop app that analyzes lo
 
 ## Current delivery status
 
-**Release candidate only. Not approved for final client delivery.** The final source build passed 46 automated tests, and the developer-host packaged executable passed isolated startup/database, restart-persistence, SQLite integrity, and all six CSV/XLSX export checks. The current executable is version 0.1.0 with SHA-256 `5EA0F66E060F440E99FE46F8E97A9D9E76E68BE00C006A0A182C0193FAB0D69F`. Installer compilation and clean-machine installation/upgrade/uninstall checks remain pending; Inno Setup was unavailable on the build host. The current build is unsigned unless an authorized signed artifact is produced separately.
+**Release candidate only. Not approved for final client delivery.** The final source build passed 46 automated tests, and the developer-host packaged executable passed isolated startup/database, restart-persistence, SQLite integrity, and all six CSV/XLSX export checks. The current executable is version 0.1.0 with SHA-256 `3AAA8595FC88FB572E567D3489C7321A01D538D3FA54730D47FC4852687DE141`. Installer compilation and clean-machine installation/upgrade/uninstall checks remain pending; Inno Setup was unavailable on the build host. The current build is unsigned unless an authorized signed artifact is produced separately.
 
 ## Historical data and rights
 

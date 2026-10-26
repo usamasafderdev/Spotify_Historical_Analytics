@@ -15,6 +15,9 @@ This is a release review inventory, not a legal opinion or a complete generated 
 | Pillow | Build-time ICO generator | HPND | Build-only dependency; do not bundle unless later runtime imports require it. |
 | pytest | Test-only dependency | MIT | Must not be shipped in the client runtime. |
 | SQLite | Local database runtime | Public domain | Confirm exact bundled Python SQLite runtime and any platform notices. |
+| KaggleHub 1.0.3 / kagglesdk 0.1.38 | Optional Phase 6 research downloader only | Apache-2.0 (verify exact package metadata) | Optional research extra; not imported by app startup or intended for the packaged client runtime. |
+| PyArrow 24.0.0 / psutil 7.2.2 / tqdm 4.67.3 | Optional research audit and bounded processing | Apache-2.0 / BSD-3-Clause / MPL-2.0 (verify exact package metadata) | Optional research extra; verify exact licenses if redistributed. Not required by the production desktop app. |
+| certifi 2026.10.23 | KaggleHub HTTPS certificate bundle | MPL-2.0 | Optional transitive research dependency; review if it is ever redistributed. |
 
 ## Mandatory release actions
 

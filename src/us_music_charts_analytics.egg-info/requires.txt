@@ -1,0 +1,17 @@
+PySide6>=6.8.0
+pandas>=2.2.0
+openpyxl>=3.1.0
+pyqtgraph>=0.13.7
+
+[build]
+pyinstaller>=6.10.0
+Pillow>=10.0.0
+
+[research]
+kagglehub>=1.0.3
+pyarrow>=18.0.0
+psutil>=6.0.0
+tqdm>=4.66.0
+
+[test]
+pytest>=8.0.0
