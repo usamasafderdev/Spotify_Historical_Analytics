@@ -1,5 +1,7 @@
 # Client Requirements Summary
 
+Current verification and release status: [Phase 9 engineering QA](PHASE_9_ENGINEERING_QA.md), with actual packaged Windows screenshots, independent arithmetic checks, benchmark evidence, and isolated installer lifecycle results. Earlier phase notes below are historical. The client has not yet decided whether the product must bundle complete historical data or accept client-supplied datasets. No complete 2017-2026 data or commercial source approval is claimed.
+
 ## Core request
 Build a professional Windows desktop analytics application for a client analyzing historical US Spotify chart data. The application must use lawfully imported datasets, avoid false claims, and support filtering, KPIs, rankings, artist/album analysis, provenance, and exports.
 

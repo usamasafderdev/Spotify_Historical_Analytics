@@ -1,0 +1,107 @@
+{
+  "pytest": {
+    "passed": 155,
+    "duration_seconds": 272.42,
+    "includes_performance_cases": 3
+  },
+  "compileall": "passed",
+  "git_diff_check": "passed",
+  "windows_qt_scale_matrix": 9,
+  "physical_dpi_tested": false,
+  "clean_windows_vm_tested": false,
+  "packaged_gui": {
+    "checks": [
+      "All seven pages and first-run empty states",
+      "Isolated synthetic preview, populated KPIs/tables/charts, scrolling",
+      "Song search, empty search, numeric sorting",
+      "Song, artist and album detail dialogs and trend charts",
+      "Actual CSV/XLSX save controls and parsed exports for all rankings, daily/weekly, filtered synthetic data",
+      "Return to real data restores empty production without contamination",
+      "Settings persistence and actual backup save control",
+      "Database restart persistence; production remains empty"
+    ],
+    "captures": [
+      "empty-01.png",
+      "empty-01-desktop.png",
+      "empty-02.png",
+      "empty-03.png",
+      "empty-04.png",
+      "empty-05.png",
+      "empty-06.png",
+      "empty-07.png",
+      "demo-01.png",
+      "demo-01-desktop.png",
+      "demo-01-content.png",
+      "demo-02.png",
+      "demo-02-desktop.png",
+      "demo-02-content.png",
+      "demo-03.png",
+      "demo-03-desktop.png",
+      "demo-03-content.png",
+      "demo-04.png",
+      "demo-04-desktop.png",
+      "demo-04-content.png",
+      "demo-05.png",
+      "demo-05-desktop.png",
+      "demo-05-content.png",
+      "demo-06.png",
+      "demo-06-content.png",
+      "demo-07.png",
+      "demo-07-desktop.png",
+      "demo-07-content.png",
+      "empty-search.png",
+      "detail-songs.png",
+      "detail-songs-desktop.png",
+      "detail-artists.png",
+      "detail-artists-desktop.png",
+      "detail-albums.png",
+      "detail-albums-desktop.png",
+      "filtered-weekly-demo.png",
+      "filtered-weekly-demo-desktop.png",
+      "simple-import.png",
+      "simple-import-desktop.png",
+      "invalid-date-error.png",
+      "invalid-date-error-desktop.png",
+      "return-to-empty.png",
+      "return-to-empty-desktop.png"
+    ],
+    "platform": "windows",
+    "device_pixel_ratio": 1.5,
+    "logical_size": [
+      1200,
+      640
+    ],
+    "production_records": 0,
+    "exported_reports": 12,
+    "errors": []
+  },
+  "installer": {
+    "clean_vm": false,
+    "desktop_shortcut": true,
+    "upgrade_preserved": true,
+    "qa_app_id": "{{EB7C2FA5-B93B-4AF7-833D-DA907E77A019}",
+    "start_menu": true,
+    "path_without_python": true,
+    "qa_root": "D:\\Study Material\\University\\Spotify Historical Analytics\\build\\phase9\\installer-qa",
+    "install": true,
+    "user_data_retained": true,
+    "uninstall": true,
+    "package_upgrade": "0.1.0 to 0.1.0.1 (same application payload)",
+    "exports": true,
+    "demo": true
+  },
+  "artifacts": [
+    {
+      "path": "dist/USMusicChartsAnalytics/USMusicChartsAnalytics.exe",
+      "bytes": 19603761,
+      "sha256": "6710EB8DF605308F1F244D9A4D8B60EC1730BD35132258B47C6CC8C2EC5ECF32",
+      "authenticode": "NotSigned"
+    },
+    {
+      "path": "dist/installer/US-Music-Charts-Analytics-Setup.exe",
+      "bytes": 77826840,
+      "sha256": "0D36E4A234D5425EF086EF8E2AE65EA5B184C3AF65205E4D63010473303C8D8D",
+      "authenticode": "NotSigned"
+    }
+  ]
+}

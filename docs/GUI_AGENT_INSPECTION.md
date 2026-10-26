@@ -1,5 +1,7 @@
 # GUI Agent Inspection
 
+This document records an earlier phase. See [Phase 9 QA](PHASE_9_ENGINEERING_QA.md) for the current Windows Qt widget automation, actual native HWND captures, inspected packaged-app screenshots, and the remaining manual desktop/DPI limitations.
+
 ## Inspection capability
 
 No native Windows desktop control/screenshot integration was available in the session. Browser automation tools are not appropriate for native PySide6 windows. Offscreen Qt widget tests and an offscreen screenshot can validate widget state/rendering but cannot prove normal desktop visuals, Windows scaling, focus behavior, OS file dialogs, or actual user-perceived responsiveness.

@@ -2,11 +2,19 @@
   #define AppVersion "0.1.0"
 #endif
 
-#define AppName "US Music Charts Analytics"
+#ifndef AppName
+  #define AppName "US Music Charts Analytics"
+#endif
+#ifndef AppIdentifier
+  #define AppIdentifier "{{9A927D80-09E2-4E6A-9C79-B67D9C90DCA1}"
+#endif
+#ifndef OutputName
+  #define OutputName "US-Music-Charts-Analytics-Setup"
+#endif
 #define AppExe "USMusicChartsAnalytics.exe"
 
 [Setup]
-AppId={{9A927D80-09E2-4E6A-9C79-B67D9C90DCA1}
+AppId={#AppIdentifier}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppName}
@@ -16,13 +24,13 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist\installer
-OutputBaseFilename=US-Music-Charts-Analytics-Setup
+OutputBaseFilename={#OutputName}
 SetupIconFile=..\assets\app_icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 Uninstallable=yes
 WizardStyle=modern
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 RestartApplications=no
 UsePreviousAppDir=yes

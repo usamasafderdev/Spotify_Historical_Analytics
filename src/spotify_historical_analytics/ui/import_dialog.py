@@ -3,6 +3,9 @@ from __future__ import annotations
 from itertools import islice
 from pathlib import Path
 import threading
+import gzip
+import zipfile
+import errno
 import time
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
@@ -12,6 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QSizePolicy,
 )
 
+from ..runtime import LOGGER
 from ..db import DatabaseManager
 from ..import_sessions import FIELD_ALIASES, ImportSessionStore
 from .theme import DIALOG_STYLE, apply_dark_theme
@@ -93,7 +97,20 @@ class ImportTask(QObject):
             if self.cancel.is_set():
                 self.completed.emit({"cancelled": True})
             else:
-                self.failed.emit(str(exc))
+                LOGGER.exception("Dataset %s failed", self.operation)
+                if isinstance(exc, (gzip.BadGzipFile, EOFError)):
+                    message = "The compressed CSV could not be read. Choose a valid CSV.GZ file."
+                elif isinstance(exc, zipfile.BadZipFile):
+                    message = "The Excel workbook could not be read. Choose a valid XLSX file."
+                elif isinstance(exc, UnicodeDecodeError):
+                    message = "The CSV text encoding is not supported. Save it as UTF-8 and try again."
+                elif isinstance(exc, PermissionError):
+                    message = "File access was denied. Check access to the selected file and destination folder."
+                elif isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+                    message = "There is not enough free disk space to complete this operation."
+                else:
+                    message = str(exc)
+                self.failed.emit(message)
         finally:
             if database is not None:
                 database.close()

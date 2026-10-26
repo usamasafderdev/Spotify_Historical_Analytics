@@ -6,22 +6,24 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+$searched = @("PATH: ISCC.exe")
 if (-not $IsccPath) {
     $candidate = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($candidate) {
-        $IsccPath = $candidate.Source
-    } else {
-        $standardPath = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
-        if (Test-Path -LiteralPath $standardPath) {
-            $IsccPath = $standardPath
+    if ($candidate) { $IsccPath = $candidate.Source }
+    foreach ($basePath in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, (Join-Path $env:LOCALAPPDATA "Programs"))) {
+        foreach ($versionNumber in @(7, 6)) {
+            $compilerPath = Join-Path $basePath "Inno Setup $versionNumber\ISCC.exe"
+            $searched += $compilerPath
+            if (-not $IsccPath -and (Test-Path -LiteralPath $compilerPath)) { $IsccPath = $compilerPath }
         }
     }
 }
 if (-not $IsccPath -or -not (Test-Path -LiteralPath $IsccPath)) {
-    throw "Inno Setup 6 is not installed. Install it from https://jrsoftware.org/isinfo.php, then rerun scripts/build_installer.ps1."
+    $searched | ForEach-Object { Write-Output "Searched: $_" }
+    throw "Inno Setup compiler not found. Install an appropriate Inno Setup release from https://jrsoftware.org/isinfo.php after reviewing its license, or pass -IsccPath to an existing compiler. No installer was built."
 }
 
-$version = python -c "import re; from pathlib import Path; s=Path('src/spotify_historical_analytics/__init__.py').read_text(); print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', s).group(1))"
+$version = python -c 'from spotify_historical_analytics import __version__; print(__version__)'
 if ($LASTEXITCODE -ne 0 -or -not $version) {
     throw "Could not read the application version."
 }

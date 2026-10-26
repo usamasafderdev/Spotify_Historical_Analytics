@@ -1,0 +1,67 @@
+{
+  "version": "0.1.0",
+  "head": "12e9286825d2ca3e8342a0b486aa33e24fb6b2d5",
+  "working_tree": [
+    " M README.md",
+    " M docs/CLIENT_HANDOVER_DRAFT.md",
+    " M docs/CLIENT_REQUIREMENTS.md",
+    " M docs/DEPENDENCY_LICENSES.md",
+    " M docs/GUI_AGENT_INSPECTION.md",
+    " M docs/METRIC_DEFINITIONS.md",
+    " M docs/PERFORMANCE_BEFORE_AFTER.md",
+    " M docs/RELEASE_QA_CHECKLIST.md",
+    " M docs/WINDOWS_INSTALLATION_GUIDE.md",
+    " M packaging/installer.iss",
+    " M packaging/windows.spec",
+    " M scripts/build_installer.ps1",
+    " M scripts/build_windows.ps1",
+    " M scripts/verify_release.ps1",
+    " M src/spotify_historical_analytics/__main__.py",
+    " M src/spotify_historical_analytics/__pycache__/__main__.cpython-314.pyc",
+    " M src/spotify_historical_analytics/__pycache__/db.cpython-314.pyc",
+    " M src/spotify_historical_analytics/exports.py",
+    " M src/spotify_historical_analytics/import_sessions.py",
+    " M src/spotify_historical_analytics/ui/__pycache__/main_window.cpython-314.pyc",
+    " M src/spotify_historical_analytics/ui/import_dialog.py",
+    " M src/spotify_historical_analytics/ui/main_window.py",
+    " M src/spotify_historical_analytics/ui/workers.py",
+    " M tests/__pycache__/test_ui_smoke.cpython-314-pytest-9.0.3.pyc",
+    " M tests/test_ui_smoke.py",
+    "?? docs/PHASE_9_ENGINEERING_QA.md",
+    "?? docs/USER_GUIDE.md",
+    "?? docs/screenshots/phase9/",
+    "?? scripts/run_phase9_visual_qa.py",
+    "?? scripts/test_installer_isolated.ps1",
+    "?? scripts/write_release_notices.py",
+    "?? src/spotify_historical_analytics/ui/phase9_qa.py",
+    "?? src/spotify_historical_analytics/ui/windows_capture.py",
+    "?? tests/test_phase9_correctness.py",
+    "?? tests/test_phase9_edges.py"
+  ],
+  "artifacts": [
+    {
+      "path": "dist/USMusicChartsAnalytics/USMusicChartsAnalytics.exe",
+      "bytes": 19603761,
+      "sha256": "6710EB8DF605308F1F244D9A4D8B60EC1730BD35132258B47C6CC8C2EC5ECF32"
+    },
+    {
+      "path": "dist/installer/US-Music-Charts-Analytics-Setup.exe",
+      "bytes": 77826840,
+      "sha256": "0D36E4A234D5425EF086EF8E2AE65EA5B184C3AF65205E4D63010473303C8D8D"
+    }
+  ],
+  "schema_user_version": 2,
+  "schema_tables": [
+    "sources",
+    "sqlite_sequence",
+    "import_batches",
+    "chart_records",
+    "tracks",
+    "artists",
+    "albums",
+    "track_artists",
+    "track_albums",
+    "metadata_import_batches",
+    "import_rights_approvals"
+  ]
+}

@@ -31,6 +31,7 @@ if (-not $SkipTests) {
 Invoke-Checked "python" @("-m", "compileall", "-q", "src", "tests")
 Invoke-Checked "python" @("scripts/generate_icon.py")
 Invoke-Checked "python" @("scripts/write_version_info.py")
+Invoke-Checked "python" @("scripts/write_release_notices.py")
 Invoke-Checked "python" @("-m", "PyInstaller", "--clean", "--noconfirm", "packaging/windows.spec", "--distpath", "dist", "--workpath", "build/pyinstaller")
 
 $smokeData = Join-Path $root "build\smoke-data"
@@ -38,11 +39,11 @@ New-Item -ItemType Directory -Path $smokeData -Force | Out-Null
 $env:SPOTIFY_ANALYTICS_DATA_DIR = $smokeData
 $env:QT_QPA_PLATFORM = "offscreen"
 $exe = Join-Path $root "dist\USMusicChartsAnalytics\USMusicChartsAnalytics.exe"
-$process = Start-Process -FilePath $exe -ArgumentList "--smoke-test" -PassThru -Wait
+$process = Start-Process -FilePath $exe -ArgumentList "--smoke-test" -WindowStyle Hidden -PassThru -Wait
 if ($process.ExitCode -ne 0) {
     throw "Packaged application smoke test failed with exit code $($process.ExitCode). See $smokeData\logs."
 }
-$exportCheck = Start-Process -FilePath $exe -ArgumentList "--release-export-test" -PassThru -Wait
+$exportCheck = Start-Process -FilePath $exe -ArgumentList "--release-export-test" -WindowStyle Hidden -PassThru -Wait
 if ($exportCheck.ExitCode -ne 0) {
     throw "Packaged CSV/XLSX export smoke test failed with exit code $($exportCheck.ExitCode)."
 }

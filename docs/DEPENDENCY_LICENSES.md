@@ -1,5 +1,45 @@
 # Third-Party Dependency and License Checklist
 
+## Phase 9 release inventory and review
+
+`scripts/write_release_notices.py` now collects exact core distribution metadata,
+available installed license/notice files, and the Python runtime license before
+each build. The bundle includes `_internal/notices/dependency-inventory.json`,
+`THIRD_PARTY_NOTICES.md`, and copied notices. This is a concrete improvement over
+the earlier checklist, but it is not a complete transitive SBOM or licensing
+clearance. In particular, the installed PySide wheel license directory exposes
+commercial-license references; these alone do not satisfy all LGPL materials.
+The final bundled DLL inventory and release assessment are in [Phase 9 QA](PHASE_9_ENGINEERING_QA.md).
+
+The initial Phase 9 inventory found the automatically collected
+`Qt6VirtualKeyboard.dll` and its input-context plugin, although this desktop app
+does not use an on-screen keyboard. [Qt Virtual Keyboard's license page](https://doc.qt.io/qt-6/qtvirtualkeyboard-index.html)
+lists commercial or GPLv3 terms. The build specification now excludes that
+optional plugin, DLL, and matching resources. Final bundle inspection and
+Windows text-entry/import/export checks verify the exclusion without removing
+the standard Windows input context. This reduces the redistribution scope but
+does not certify licensing of every remaining component.
+
+Qt's published guidance requires review per module and, for LGPL distribution,
+applicable notices, library source availability, and replacement/relinking rights.
+Some modules have GPL-only open-source terms. The dynamic DLL packaging does not
+by itself complete these obligations. See [Qt obligations](https://www.qt.io/development/open-source-lgpl-obligations)
+and [Qt 6 licensing](https://doc.qt.io/qt-6/licensing.html). Final proprietary
+distribution review remains open; no commercial Qt license was purchased.
+
+Inno Setup 6.7.3 was already installed in the current user's Programs folder and
+was used to compile the installer. Its compiler reports non-commercial use. The
+vendor requests commercial purchases but explicitly says they are not strictly
+required in its [commercial-license FAQ](https://jrsoftware.org/isorder.php).
+Review the applicable [Inno license](https://jrsoftware.org/files/is/license.txt)
+and organization policy before release; no purchase or license-key changes were made.
+
+The EXE and Setup are unsigned. Authorized publisher signing and client security
+policy acceptance remain release work. See [Microsoft signing guidance](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control).
+No Defender or SmartScreen protection was disabled for these checks.
+
+## Earlier inventory
+
 This is a release review inventory, not a legal opinion or a complete generated software bill of materials. Build-time versions observed during Phase 5 audit: Python 3.14.3; PyInstaller 6.22.0; PySide6, PySide6-Essentials, and PySide6-Addons 6.12.0; PyQtGraph 0.14.0; Pandas 2.3.3; NumPy 2.4.2; OpenPyXL 3.1.5; et-xmlfile 2.0.0; Pillow 12.1.1; and pytest 9.0.3. Pillow and pytest are build/test dependencies. PyArrow was explicitly excluded from the final bundle. Re-run `python -m pip show <package>` and inspect installed `METADATA`/license files for the exact release being shipped. The build environment's versions are not a substitute for the final bundle inventory.
 
 | Component | Usage | Commonly declared license | Release action |

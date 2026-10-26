@@ -32,6 +32,11 @@ def main() -> int:
         from .ui.visual_qa import run_visual_qa
         index = sys.argv.index("--import-visual-qa")
         return run_visual_qa(Path(sys.argv[index + 1]), int(sys.argv[index + 2]), int(sys.argv[index + 3]))
+    if "--phase9-visual-qa" in sys.argv:
+        from pathlib import Path
+        from .ui.phase9_qa import run_phase9_qa
+        index = sys.argv.index("--phase9-visual-qa")
+        return run_phase9_qa(Path(sys.argv[index + 1]), int(sys.argv[index + 2]), int(sys.argv[index + 3]))
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
     app.setOrganizationName("US Music Charts Analytics")
@@ -107,6 +112,21 @@ def main() -> int:
         window.show()
 
         if demo_smoke_test:
+            app.setQuitOnLastWindowClosed(False)
+            timeout = QTimer(window)
+            timeout.setSingleShot(True)
+            completed = False
+
+            def finish_demo(code: int) -> None:
+                nonlocal completed
+                if completed:
+                    return
+                completed = True
+                timeout.stop()
+                # Close SQLite connections and the temporary demo directory before exit.
+                window.close()
+                app.exit(code)
+
             def verify_demo_dashboard() -> None:
                 visible_demo = (
                     window._demo_mode
@@ -122,22 +142,19 @@ def main() -> int:
                     LOGGER.info(
                         "Demo UI smoke test passed: KPI cards, songs, artists, albums, and charts are populated."
                     )
-                    app.exit(0)
+                    finish_demo(0)
                 else:
                     LOGGER.error(
                         "Demo UI smoke test failed: one or more expected synthetic widgets are empty."
                     )
-                    app.exit(2)
+                    finish_demo(2)
 
             window.dashboard_updated.connect(verify_demo_dashboard)
             window.load_demo_data()
-            QTimer.singleShot(
-                20_000,
-                lambda: (
-                    LOGGER.error("Demo UI smoke test timed out."),
-                    app.exit(3),
-                ),
-            )
+            timeout.timeout.connect(lambda: (
+                LOGGER.error("Demo UI smoke test timed out."), finish_demo(3)
+            ))
+            timeout.start(20_000)
         elif smoke_test:
             QTimer.singleShot(5000, window.close)
         return app.exec()

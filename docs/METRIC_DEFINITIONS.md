@@ -5,7 +5,7 @@ These are derived from imported chart observations and are not official Spotify 
 
 - `Total available chart streams in selected period`: sum of all valid imported `streams` rows in the selected date range.
 - `Distinct charting tracks`: count of unique track identities in the selected range.
-- `Distinct credited artists`: count of unique artist identities in the selected range.
+- `Distinct credited artists` overview KPI: count of unique whole credited-artist strings in the selected range. This differs from the stable-ID attribution used for artist rankings.
 - `Chart dates with data`: count of unique chart dates containing at least one valid record.
 - `Observed coverage percentage`: observed chart dates divided by expected reporting intervals in the selected range. Daily data uses inclusive calendar days; weekly data uses seven-day intervals from the chart-date range. With no explicit date range, the observed minimum and maximum chart dates define the range.
 - Coverage is descriptive only. It does not establish that the imported source is complete, that every reporting date was expected, or that unavailable dates had zero streams.
@@ -31,7 +31,7 @@ These are derived from imported chart observations and are not official Spotify 
 - Research candidate files and staging databases are not included in production KPIs or coverage inventory. Their status is `RESEARCH ONLY`, separate from `UNVERIFIED` production source rights.
 - Dhruvil Viral 50 is preserved as a separate chart category and has no stream metric in the canonical adapter. Do not coerce popularity, trend, rank, or missing Viral 50 values into streams.
 - A `DEMO / SYNTHETIC` dataset is excluded from the real-data metrics review and must be visually labeled.
-- The synthetic preview uses a separate temporary SQLite database. Synthetic values are visible only while explicitly in demo mode and are never merged into production queries, backups, or exports.
+- The synthetic preview uses a separate temporary SQLite database. Synthetic values are visible only while explicitly in demo mode and are never merged into the normal production database, queries, backups, or real-mode exports. Explicit exports from demo mode include synthetic values and label them in the report definitions.
 - Rankings exports use the same USA/chart/date/search ranking query and selected Top 50/100/200 limit as the on-screen result set. Exports include the metric definition, active date interval, chart type, observed coverage, and overlapping real source names and attribution notes.
 - Exported artist values preserve full-credit attribution and may overlap across collaborators. Exported album metrics remain charting-track streams, not official or comprehensive album totals.
 - Exported coverage is observed coverage only; it does not verify that a source is complete. Empty ranking exports include metadata and headers but have no ranking data rows.

@@ -1,0 +1,164 @@
+[
+  {
+    "name": "PySide6",
+    "version": "6.12.0",
+    "license_expression": null,
+    "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+    "notice_files": [
+      "licenses\\PySide6\\pyside6-6.12.0.dist-info\\licenses\\LicenseRef-Qt-Commercial.txt"
+    ]
+  },
+  {
+    "name": "PySide6-Essentials",
+    "version": "6.12.0",
+    "license_expression": null,
+    "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+    "notice_files": [
+      "licenses\\PySide6-Essentials\\pyside6_essentials-6.12.0.dist-info\\licenses\\LicenseRef-Qt-Commercial.txt"
+    ]
+  },
+  {
+    "name": "PySide6-Addons",
+    "version": "6.12.0",
+    "license_expression": null,
+    "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+    "notice_files": [
+      "licenses\\PySide6-Addons\\pyside6_addons-6.12.0.dist-info\\licenses\\LicenseRef-Qt-Commercial.txt"
+    ]
+  },
+  {
+    "name": "shiboken6",
+    "version": "6.12.0",
+    "license_expression": null,
+    "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+    "notice_files": [
+      "licenses\\shiboken6\\shiboken6-6.12.0.dist-info\\licenses\\LicenseRef-Qt-Commercial.txt"
+    ]
+  },
+  {
+    "name": "pyqtgraph",
+    "version": "0.14.0",
+    "license_expression": null,
+    "license": "MIT",
+    "notice_files": [
+      "licenses\\pyqtgraph\\pyqtgraph-0.14.0.dist-info\\licenses\\LICENSE.txt"
+    ]
+  },
+  {
+    "name": "pandas",
+    "version": "2.3.3",
+    "license_expression": null,
+    "license": "BSD 3-Clause License\n\n Copyright (c) 2008-2011, AQR Capital Management, LLC, Lambda Foundry, Inc. and PyData Development Team\n All rights reserved.\n\n Copyright (c) 2011-2023, Open source contributors.\n\n Redistribution and use in source and binary forms, with or without\n modification, are permitted provided that the following conditions are met:\n\n * Redistributions of source code must retain the above copyright notice, this\n   list of conditions and the following disclaimer.\n\n * Redistributions in binary form must reproduce the above copyright notice,\n   this list of conditions and the following disclaimer in the documentation\n   and/or other materials provided with the distribution.\n\n * Neither the name of the copyright holder nor the names of its\n   contributors may be used to endorse or promote products derived from\n   this software without specific prior written permission.\n\n THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"\n AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\n IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\n DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE\n FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL\n DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR\n SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER\n CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,\n OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\n OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n",
+    "notice_files": [
+      "licenses\\pandas\\pandas-2.3.3.dist-info\\LICENSE"
+    ]
+  },
+  {
+    "name": "numpy",
+    "version": "2.4.2",
+    "license_expression": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+    "license": null,
+    "notice_files": [
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\LICENSE.txt",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\_core\\include\\numpy\\libdivide\\LICENSE.txt",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\_core\\src\\common\\pythoncapi-compat\\COPYING",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\_core\\src\\highway\\LICENSE",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\_core\\src\\multiarray\\dragon4_LICENSE.txt",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\_core\\src\\npysort\\x86-simd-sort\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\_core\\src\\umath\\svml\\LICENSE",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\fft\\pocketfft\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\linalg\\lapack_lite\\LICENSE.txt",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\ma\\LICENSE",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\random\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\random\\src\\distributions\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\random\\src\\mt19937\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\random\\src\\pcg64\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\random\\src\\philox\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\random\\src\\sfc64\\LICENSE.md",
+      "licenses\\numpy\\numpy-2.4.2.dist-info\\licenses\\numpy\\random\\src\\splitmix64\\LICENSE.md",
+      "licenses\\numpy\\numpy\\_core\\include\\numpy\\random\\LICENSE.txt",
+      "licenses\\numpy\\numpy\\ma\\LICENSE",
+      "licenses\\numpy\\numpy\\random\\LICENSE.md"
+    ]
+  },
+  {
+    "name": "openpyxl",
+    "version": "3.1.5",
+    "license_expression": null,
+    "license": "MIT",
+    "notice_files": [
+      "licenses\\openpyxl\\openpyxl-3.1.5.dist-info\\LICENCE.rst"
+    ]
+  },
+  {
+    "name": "et-xmlfile",
+    "version": "2.0.0",
+    "license_expression": null,
+    "license": "MIT",
+    "notice_files": [
+      "licenses\\et-xmlfile\\et_xmlfile-2.0.0.dist-info\\LICENCE.python",
+      "licenses\\et-xmlfile\\et_xmlfile-2.0.0.dist-info\\LICENCE.rst"
+    ]
+  },
+  {
+    "name": "python-dateutil",
+    "version": "2.9.0.post0",
+    "license_expression": null,
+    "license": "Dual License",
+    "notice_files": [
+      "licenses\\python-dateutil\\python_dateutil-2.9.0.post0.dist-info\\LICENSE"
+    ]
+  },
+  {
+    "name": "pytz",
+    "version": "2026.1.post1",
+    "license_expression": null,
+    "license": "MIT",
+    "notice_files": [
+      "licenses\\pytz\\pytz-2026.1.post1.dist-info\\LICENSE.txt"
+    ]
+  },
+  {
+    "name": "tzdata",
+    "version": "2025.3",
+    "license_expression": null,
+    "license": "Apache-2.0",
+    "notice_files": [
+      "licenses\\tzdata\\tzdata-2025.3.dist-info\\licenses\\LICENSE",
+      "licenses\\tzdata\\tzdata-2025.3.dist-info\\licenses\\licenses\\LICENSE_APACHE"
+    ]
+  },
+  {
+    "name": "six",
+    "version": "1.17.0",
+    "license_expression": null,
+    "license": "MIT",
+    "notice_files": [
+      "licenses\\six\\six-1.17.0.dist-info\\LICENSE"
+    ]
+  },
+  {
+    "name": "packaging",
+    "version": "26.0",
+    "license_expression": "Apache-2.0 OR BSD-2-Clause",
+    "license": null,
+    "notice_files": [
+      "licenses\\packaging\\packaging-26.0.dist-info\\licenses\\LICENSE",
+      "licenses\\packaging\\packaging-26.0.dist-info\\licenses\\LICENSE.APACHE",
+      "licenses\\packaging\\packaging-26.0.dist-info\\licenses\\LICENSE.BSD",
+      "licenses\\packaging\\packaging\\licenses\\__init__.py",
+      "licenses\\packaging\\packaging\\licenses\\__pycache__\\__init__.cpython-314.pyc",
+      "licenses\\packaging\\packaging\\licenses\\__pycache__\\_spdx.cpython-314.pyc",
+      "licenses\\packaging\\packaging\\licenses\\_spdx.py"
+    ]
+  },
+  {
+    "name": "PyInstaller",
+    "version": "6.22.0",
+    "license_expression": null,
+    "license": "GPLv2-or-later with a special exception which allows to use PyInstaller to build and distribute non-free programs (including commercial ones)",
+    "notice_files": [
+      "licenses\\PyInstaller\\pyinstaller-6.22.0.dist-info\\licenses\\COPYING.txt"
+    ]
+  }
+]

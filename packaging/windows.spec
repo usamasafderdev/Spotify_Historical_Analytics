@@ -6,7 +6,7 @@ from PyInstaller.utils.hooks import collect_data_files
 ROOT = Path(SPECPATH).parent
 sys.path.insert(0, str(ROOT / "src"))
 
-datas = [(str(ROOT / "assets"), "assets")]
+datas = [(str(ROOT / "assets"), "assets"), (str(ROOT / "build" / "release-notices"), "notices")]
 binaries = []
 hiddenimports = [
     "PySide6.QtSvg",
@@ -58,6 +58,11 @@ analysis = Analysis(
     ],
     noarchive=False,
 )
+# Qt's automatic plugin collection includes an unused virtual keyboard whose
+# open-source terms are GPLv3 rather than LGPL. This desktop app uses Windows'
+# standard input context; omit that optional plugin and its DLL/resources.
+analysis.binaries = [entry for entry in analysis.binaries if "virtualkeyboard" not in entry[0].lower()]
+analysis.datas = [entry for entry in analysis.datas if "virtualkeyboard" not in entry[0].lower()]
 pyz = PYZ(analysis.pure)
 executable = EXE(
     pyz,

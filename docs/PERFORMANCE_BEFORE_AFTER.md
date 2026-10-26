@@ -63,3 +63,47 @@ plan. A separate summary-plan regression asserts use of
   interactive UI responsiveness.
 - Repeat performance and interactive checks on representative Windows 10/11
   client hardware before delivery.
+
+## Phase 9 measurements (2026-10-26)
+
+The baseline was freshly measured using the existing synthetic generator at
+25k/100k/500k observations. After the query changes, the same retained databases
+were queried again, without rebuilding or adding indexes. Each figure is an
+observed run, not a statistical latency guarantee. Cache warmth and host load
+were not controlled. Query plans and after figures are retained in
+[query-plans-and-after.json](screenshots/phase9/query-plans-and-after.json).
+
+| Rows | Summary before / after (ms) | Songs before / after (ms) | Artists before / after (ms) | Unchanged DB (MiB) |
+|---:|---:|---:|---:|---:|
+| 25,000 | 30.01 / 34.07 | 57.34 / 70.79 | 36.10 / 41.27 | 18.68 |
+| 100,000 | 619.15 / 144.83 | 689.66 / 257.56 | 353.92 / 181.79 | 75.49 |
+| 500,000 | 7,887.67 / 881.79 | 2,809.91 / 1,277.12 | 5,828.37 / 853.40 | 370.28 |
+
+SQLite scratch trees now use memory (`temp_store=MEMORY`). Artist attribution
+uses a deduplicated materialized track/artist mapping and one chart scan, replacing
+the repeated UNION/correlated fallback path. Plans use the existing covering real
+analytics index; grouping and DISTINCT scratch trees still exist. No summary cache
+or additional persistent index was introduced. The arithmetic oracle verifies
+full-credit collaborators, whole-credit fallback, and duplicate mapping rules.
+
+The first complete Phase 9 suite separately measured these figures in a UI-loaded
+process. This is not the same-database A/B comparison above:
+
+| Rows | Insert (s) | Summary (ms) | Songs (ms) | Artists (ms) | Peak process RSS (MiB) |
+|---:|---:|---:|---:|---:|---:|
+| 25,000 | 6.070 | 80.25 | 106.11 | 53.57 | 277.24 |
+| 100,000 | 29.794 | 316.50 | 786.02 | 297.77 | 285.26 |
+| 500,000 | 179.027 | 1,536.84 | 2,426.74 | 1,468.11 | 344.20 |
+
+Baseline insertion was 2.538 / 24.550 / 168.399 seconds. Insertion has **not**
+been shown to improve. Process RSS includes imported UI/test modules and cannot
+be compared directly to the baseline-only process (66-68 MiB). Memory scratch
+trees also trade RAM for disk latency. The database is still 370.28 MiB at 500k.
+Some small-data timings regressed slightly. These results do not establish that
+all performance targets are met on client hardware. Fresh final-suite evidence
+and its host-load qualifications are in [Phase 9 QA](PHASE_9_ENGINEERING_QA.md).
+
+Dashboard work remains off the GUI thread. Superseded dashboard reads now receive
+SQLite progress-handler cancellation in addition to generation guards. A real
+QThread regression interrupts a long recursive SQLite query without surfacing an
+error; visual automation verifies filter/search transitions and shutdown.

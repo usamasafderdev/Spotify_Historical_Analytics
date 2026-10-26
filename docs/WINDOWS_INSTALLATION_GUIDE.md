@@ -1,5 +1,13 @@
 # Windows Installation and Data Guide
 
+Phase 9 produced `dist\installer\US-Music-Charts-Analytics-Setup.exe` using the
+already-installed Inno Setup 6.7.3. A separate QA product identity and workspace
+installation path were used for host install, shortcut, no-Python-on-PATH launch,
+version upgrade, persistence, export, demo, and uninstall checks. This was not a
+clean Windows VM or separate-account test. See [current evidence and hashes](PHASE_9_ENGINEERING_QA.md)
+and the [version 0.1.0 user guide](USER_GUIDE.md). The artifacts remain unsigned
+and final client delivery is not approved.
+
 ## Client installation
 
 The release candidate is a per-user x64 application. If an installer has been compiled and approved, run `US-Music-Charts-Analytics-Setup.exe` from its verified release location. Windows may show an unsigned-publisher/SmartScreen warning because this build is not code-signed; do not bypass security controls unless the organization's normal software approval process explicitly authorizes the file.

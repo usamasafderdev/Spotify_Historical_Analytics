@@ -337,6 +337,9 @@ def test_first_run_empty_state_and_demo_preview_widgets(tmp_path: Path) -> None:
     assert window.album_table.rowCount() > 0
     assert window.streams_chart.plot.listDataItems()
     assert window.top_songs_chart.plot.listDataItems()
+    import pyqtgraph as pg
+    assert not isinstance(window.top_songs_chart.plot.getAxis("bottom"), pg.DateAxisItem)
+    assert isinstance(window.streams_chart.plot.getAxis("bottom"), pg.DateAxisItem)
 
     old_generation = window._dashboard_generation
     window.chart_type_combo.setCurrentIndex(window.chart_type_combo.findData("weekly"))

@@ -1,5 +1,7 @@
 # Windows Release QA Checklist
 
+Current completed checks and explicit remaining gates are recorded in [Phase 9 QA](PHASE_9_ENGINEERING_QA.md). Automated host installation tests are not a clean Windows VM test. The checklist below remains the manual acceptance checklist.
+
 Use a clean Windows 10/11 x64 VM or a separately documented Windows test account. Record OS build, display scale, app version, artifact SHA-256, tester, date, and results. Do not mark clean-machine checks complete from an offscreen or developer-only run.
 
 ## Build and security

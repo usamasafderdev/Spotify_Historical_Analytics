@@ -1,0 +1,717 @@
+{
+  "exe_sha256": "6710EB8DF605308F1F244D9A4D8B60EC1730BD35132258B47C6CC8C2EC5ECF32",
+  "module_roots": [
+    "PySide6",
+    "__future__",
+    "_aix_support",
+    "_ast_unparse",
+    "_colorize",
+    "_compat_pickle",
+    "_distutils_hack",
+    "_markupbase",
+    "_opcode_metadata",
+    "_py_abc",
+    "_py_warnings",
+    "_pydatetime",
+    "_pydecimal",
+    "_pyi_rth_utils",
+    "_pyrepl",
+    "_sitebuiltins",
+    "_strptime",
+    "_threading_local",
+    "aiohappyeyeballs",
+    "aiohttp",
+    "aiosignal",
+    "annotated_types",
+    "annotationlib",
+    "argparse",
+    "ast",
+    "asyncio",
+    "attr",
+    "base64",
+    "bcrypt",
+    "bdb",
+    "bisect",
+    "bs4",
+    "bz2",
+    "cProfile",
+    "calendar",
+    "certifi",
+    "charset_normalizer",
+    "cmd",
+    "code",
+    "codeop",
+    "colorama",
+    "colorsys",
+    "comm",
+    "compression",
+    "concurrent",
+    "configparser",
+    "contextlib",
+    "contextvars",
+    "copy",
+    "cryptography",
+    "csv",
+    "ctypes",
+    "curses",
+    "dataclasses",
+    "datetime",
+    "dateutil",
+    "debugpy",
+    "decimal",
+    "defusedxml",
+    "difflib",
+    "dis",
+    "doctest",
+    "dotenv",
+    "email",
+    "et_xmlfile",
+    "fileinput",
+    "fnmatch",
+    "fractions",
+    "frozenlist",
+    "fsspec",
+    "ftplib",
+    "getopt",
+    "getpass",
+    "gettext",
+    "glob",
+    "gzip",
+    "hashlib",
+    "hmac",
+    "html",
+    "http",
+    "idna",
+    "importlib",
+    "inspect",
+    "ipaddress",
+    "ipykernel",
+    "ipywidgets",
+    "jinja2",
+    "json",
+    "jupyter_client",
+    "jupyter_core",
+    "logging",
+    "lxml",
+    "lzma",
+    "markdown_it",
+    "markupsafe",
+    "matplotlib_inline",
+    "mdurl",
+    "mimetypes",
+    "multidict",
+    "multiprocessing",
+    "nest_asyncio",
+    "netrc",
+    "numbers",
+    "numpy",
+    "opcode",
+    "openpyxl",
+    "optparse",
+    "packaging",
+    "pandas",
+    "pathlib",
+    "pdb",
+    "pickle",
+    "pickletools",
+    "pkgutil",
+    "platform",
+    "platformdirs",
+    "pprint",
+    "profile",
+    "propcache",
+    "pstats",
+    "psutil",
+    "pty",
+    "py_compile",
+    "pydantic",
+    "pydantic_core",
+    "pydoc",
+    "pydoc_data",
+    "pygments",
+    "pyqtgraph",
+    "pytz",
+    "queue",
+    "quopri",
+    "random",
+    "requests",
+    "rich",
+    "rlcompleter",
+    "runpy",
+    "secrets",
+    "selectors",
+    "setuptools",
+    "shiboken6",
+    "shlex",
+    "shutil",
+    "signal",
+    "site",
+    "six",
+    "smtplib",
+    "socket",
+    "socketserver",
+    "soupsieve",
+    "spotify_historical_analytics",
+    "sqlite3",
+    "ssl",
+    "statistics",
+    "string",
+    "stringprep",
+    "subprocess",
+    "sysconfig",
+    "tarfile",
+    "tempfile",
+    "textwrap",
+    "threading",
+    "threadpoolctl",
+    "token",
+    "tokenize",
+    "toml",
+    "tomllib",
+    "tornado",
+    "tqdm",
+    "tracemalloc",
+    "traitlets",
+    "tty",
+    "typing",
+    "typing_extensions",
+    "typing_inspection",
+    "tzdata",
+    "unittest",
+    "urllib",
+    "urllib3",
+    "uuid",
+    "webbrowser",
+    "xml",
+    "xmlrpc",
+    "yaml",
+    "yarl",
+    "zipfile",
+    "zipimport",
+    "zoneinfo"
+  ],
+  "installed_distribution_mapping": [
+    {
+      "module": "PySide6",
+      "distribution": "PySide6",
+      "version": "6.12.0",
+      "declared_license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+    },
+    {
+      "module": "PySide6",
+      "distribution": "PySide6_Addons",
+      "version": "6.12.0",
+      "declared_license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+    },
+    {
+      "module": "PySide6",
+      "distribution": "PySide6_Essentials",
+      "version": "6.12.0",
+      "declared_license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+    },
+    {
+      "module": "PySide6",
+      "distribution": "PySide6_Pdf",
+      "version": "6.12.0.140",
+      "declared_license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+    },
+    {
+      "module": "PySide6",
+      "distribution": "PySide6_WebEngine",
+      "version": "6.12.0.140",
+      "declared_license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+    },
+    {
+      "module": "_distutils_hack",
+      "distribution": "setuptools",
+      "version": "82.0.0",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "aiohappyeyeballs",
+      "distribution": "aiohappyeyeballs",
+      "version": "2.6.1",
+      "declared_license": "PSF-2.0"
+    },
+    {
+      "module": "aiohttp",
+      "distribution": "aiohttp",
+      "version": "3.13.3",
+      "declared_license": "Apache-2.0 AND MIT"
+    },
+    {
+      "module": "aiosignal",
+      "distribution": "aiosignal",
+      "version": "1.4.0",
+      "declared_license": "Apache 2.0"
+    },
+    {
+      "module": "annotated_types",
+      "distribution": "annotated-types",
+      "version": "0.7.0",
+      "declared_license": null
+    },
+    {
+      "module": "attr",
+      "distribution": "attrs",
+      "version": "25.4.0",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "bcrypt",
+      "distribution": "bcrypt",
+      "version": "4.3.0",
+      "declared_license": "Apache-2.0"
+    },
+    {
+      "module": "bs4",
+      "distribution": "beautifulsoup4",
+      "version": "4.14.3",
+      "declared_license": "MIT License"
+    },
+    {
+      "module": "certifi",
+      "distribution": "certifi",
+      "version": "2026.10.23",
+      "declared_license": "MPL-2.0"
+    },
+    {
+      "module": "charset_normalizer",
+      "distribution": "charset-normalizer",
+      "version": "3.4.5",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "colorama",
+      "distribution": "colorama",
+      "version": "0.4.6",
+      "declared_license": null
+    },
+    {
+      "module": "comm",
+      "distribution": "comm",
+      "version": "0.2.3",
+      "declared_license": "BSD 3-Clause License\n\nCopyright (c) 2022, Jupyter\nAll rights reserved.\n\nRedistribution and use in source and binary forms, with or without\nmodification, are permitted provided that the following conditions are met:\n\n1. Redistributions of source code must retain the above copyright notice, this\n   list of conditions and the following disclaimer.\n\n2. Redistributions in binary form must reproduce the above copyright notice,\n   this list of conditions and the following disclaimer in the documentation\n   and/or other materials provided with the distribution.\n\n3. Neither the name of the copyright holder nor the names of its\n   contributors may be used to endorse or promote products derived from\n   this software without specific prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"\nAND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\nIMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE\nFOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL\nDAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR\nSERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER\nCAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,\nOR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\nOF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
+    },
+    {
+      "module": "cryptography",
+      "distribution": "cryptography",
+      "version": "48.0.0",
+      "declared_license": "Apache-2.0 OR BSD-3-Clause"
+    },
+    {
+      "module": "dateutil",
+      "distribution": "python-dateutil",
+      "version": "2.9.0.post0",
+      "declared_license": "Dual License"
+    },
+    {
+      "module": "debugpy",
+      "distribution": "debugpy",
+      "version": "1.8.20",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "defusedxml",
+      "distribution": "defusedxml",
+      "version": "0.7.1",
+      "declared_license": "PSFL"
+    },
+    {
+      "module": "dotenv",
+      "distribution": "python-dotenv",
+      "version": "1.2.2",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "et_xmlfile",
+      "distribution": "et_xmlfile",
+      "version": "2.0.0",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "frozenlist",
+      "distribution": "frozenlist",
+      "version": "1.8.0",
+      "declared_license": "Apache-2.0"
+    },
+    {
+      "module": "fsspec",
+      "distribution": "fsspec",
+      "version": "2026.6.0",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "idna",
+      "distribution": "idna",
+      "version": "3.11",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "ipykernel",
+      "distribution": "ipykernel",
+      "version": "7.2.0",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "ipywidgets",
+      "distribution": "ipywidgets",
+      "version": "8.1.8",
+      "declared_license": "BSD 3-Clause License"
+    },
+    {
+      "module": "jinja2",
+      "distribution": "Jinja2",
+      "version": "3.1.6",
+      "declared_license": null
+    },
+    {
+      "module": "jupyter_client",
+      "distribution": "jupyter_client",
+      "version": "8.8.0",
+      "declared_license": "BSD 3-Clause License\n\n- Copyright (c) 2001-2015, IPython Development Team\n- Copyright (c) 2015-, Jupyter Development Team\n\nAll rights reserved.\n\nRedistribution and use in source and binary forms, with or without\nmodification, are permitted provided that the following conditions are met:\n\n1. Redistributions of source code must retain the above copyright notice, this\n   list of conditions and the following disclaimer.\n\n2. Redistributions in binary form must reproduce the above copyright notice,\n   this list of conditions and the following disclaimer in the documentation\n   and/or other materials provided with the distribution.\n\n3. Neither the name of the copyright holder nor the names of its\n   contributors may be used to endorse or promote products derived from\n   this software without specific prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"\nAND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\nIMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE\nFOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL\nDAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR\nSERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER\nCAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,\nOR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\nOF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
+    },
+    {
+      "module": "jupyter_core",
+      "distribution": "jupyter_core",
+      "version": "5.9.1",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "lxml",
+      "distribution": "lxml",
+      "version": "6.1.0",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "markdown_it",
+      "distribution": "markdown-it-py",
+      "version": "4.2.0",
+      "declared_license": null
+    },
+    {
+      "module": "markupsafe",
+      "distribution": "MarkupSafe",
+      "version": "3.0.3",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "matplotlib_inline",
+      "distribution": "matplotlib-inline",
+      "version": "0.2.1",
+      "declared_license": null
+    },
+    {
+      "module": "mdurl",
+      "distribution": "mdurl",
+      "version": "0.1.2",
+      "declared_license": null
+    },
+    {
+      "module": "multidict",
+      "distribution": "multidict",
+      "version": "6.7.1",
+      "declared_license": "Apache License 2.0"
+    },
+    {
+      "module": "nest_asyncio",
+      "distribution": "nest-asyncio",
+      "version": "1.6.0",
+      "declared_license": "BSD"
+    },
+    {
+      "module": "numpy",
+      "distribution": "numpy",
+      "version": "2.4.2",
+      "declared_license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+    },
+    {
+      "module": "openpyxl",
+      "distribution": "openpyxl",
+      "version": "3.1.5",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "packaging",
+      "distribution": "packaging",
+      "version": "26.0",
+      "declared_license": "Apache-2.0 OR BSD-2-Clause"
+    },
+    {
+      "module": "pandas",
+      "distribution": "pandas",
+      "version": "2.3.3",
+      "declared_license": "BSD 3-Clause License\n\n Copyright (c) 2008-2011, AQR Capital Management, LLC, Lambda Foundry, Inc. and PyData Development Team\n All rights reserved.\n\n Copyright (c) 2011-2023, Open source contributors.\n\n Redistribution and use in source and binary forms, with or without\n modification, are permitted provided that the following conditions are met:\n\n * Redistributions of source code must retain the above copyright notice, this\n   list of conditions and the following disclaimer.\n\n * Redistributions in binary form must reproduce the above copyright notice,\n   this list of conditions and the following disclaimer in the documentation\n   and/or other materials provided with the distribution.\n\n * Neither the name of the copyright holder nor the names of its\n   contributors may be used to endorse or promote products derived from\n   this software without specific prior written permission.\n\n THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"\n AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\n IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\n DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE\n FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL\n DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR\n SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER\n CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,\n OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\n OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n"
+    },
+    {
+      "module": "platformdirs",
+      "distribution": "platformdirs",
+      "version": "4.9.4",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "propcache",
+      "distribution": "propcache",
+      "version": "0.4.1",
+      "declared_license": "Apache-2.0"
+    },
+    {
+      "module": "psutil",
+      "distribution": "psutil",
+      "version": "7.2.2",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "pydantic",
+      "distribution": "pydantic",
+      "version": "2.13.3",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "pydantic_core",
+      "distribution": "pydantic_core",
+      "version": "2.46.3",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "pygments",
+      "distribution": "Pygments",
+      "version": "2.19.2",
+      "declared_license": "BSD-2-Clause"
+    },
+    {
+      "module": "pyqtgraph",
+      "distribution": "pyqtgraph",
+      "version": "0.14.0",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "pytz",
+      "distribution": "pytz",
+      "version": "2026.1.post1",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "requests",
+      "distribution": "requests",
+      "version": "2.32.5",
+      "declared_license": "Apache-2.0"
+    },
+    {
+      "module": "rich",
+      "distribution": "rich",
+      "version": "15.0.0",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "setuptools",
+      "distribution": "setuptools",
+      "version": "82.0.0",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "shiboken6",
+      "distribution": "shiboken6",
+      "version": "6.12.0",
+      "declared_license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+    },
+    {
+      "module": "six",
+      "distribution": "six",
+      "version": "1.17.0",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "soupsieve",
+      "distribution": "soupsieve",
+      "version": "2.8.3",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "spotify_historical_analytics",
+      "distribution": "spotify-historical-analytics",
+      "version": "0.1.0",
+      "declared_license": null
+    },
+    {
+      "module": "spotify_historical_analytics",
+      "distribution": "us-music-charts-analytics",
+      "version": "0.1.0",
+      "declared_license": null
+    },
+    {
+      "module": "spotify_historical_analytics",
+      "distribution": "spotify-historical-analytics",
+      "version": "0.1.0",
+      "declared_license": null
+    },
+    {
+      "module": "spotify_historical_analytics",
+      "distribution": "us-music-charts-analytics",
+      "version": "0.1.0",
+      "declared_license": null
+    },
+    {
+      "module": "threadpoolctl",
+      "distribution": "threadpoolctl",
+      "version": "3.6.0",
+      "declared_license": "BSD-3-Clause"
+    },
+    {
+      "module": "toml",
+      "distribution": "toml",
+      "version": "0.10.2",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "tornado",
+      "distribution": "tornado",
+      "version": "6.5.4",
+      "declared_license": "Apache-2.0"
+    },
+    {
+      "module": "tqdm",
+      "distribution": "tqdm",
+      "version": "4.67.3",
+      "declared_license": "MPL-2.0 AND MIT"
+    },
+    {
+      "module": "traitlets",
+      "distribution": "traitlets",
+      "version": "5.14.3",
+      "declared_license": "BSD 3-Clause License\n\n- Copyright (c) 2001-, IPython Development Team\n\nAll rights reserved.\n\nRedistribution and use in source and binary forms, with or without\nmodification, are permitted provided that the following conditions are met:\n\n1. Redistributions of source code must retain the above copyright notice, this\n   list of conditions and the following disclaimer.\n\n2. Redistributions in binary form must reproduce the above copyright notice,\n   this list of conditions and the following disclaimer in the documentation\n   and/or other materials provided with the distribution.\n\n3. Neither the name of the copyright holder nor the names of its\n   contributors may be used to endorse or promote products derived from\n   this software without specific prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"\nAND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\nIMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE\nFOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL\nDAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR\nSERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER\nCAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,\nOR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\nOF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
+    },
+    {
+      "module": "typing_extensions",
+      "distribution": "typing_extensions",
+      "version": "4.15.0",
+      "declared_license": "PSF-2.0"
+    },
+    {
+      "module": "typing_inspection",
+      "distribution": "typing-inspection",
+      "version": "0.4.2",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "tzdata",
+      "distribution": "tzdata",
+      "version": "2025.3",
+      "declared_license": "Apache-2.0"
+    },
+    {
+      "module": "urllib3",
+      "distribution": "urllib3",
+      "version": "2.6.3",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "yaml",
+      "distribution": "PyYAML",
+      "version": "6.0.3",
+      "declared_license": "MIT"
+    },
+    {
+      "module": "yarl",
+      "distribution": "yarl",
+      "version": "1.23.0",
+      "declared_license": "Apache-2.0"
+    }
+  ],
+  "application_absolute_bytecode_filename_modules": [],
+  "application_literal_developer_path_modules": [],
+  "application_secret_candidates": [],
+  "resource_secret_candidates": [],
+  "data_files": [
+    "_internal/pyqtgraph/colors/maps/CET-C1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C1s.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C2s.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C3.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C3s.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C4.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C4s.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C5.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C5s.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C6.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C6s.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C7.csv",
+    "_internal/pyqtgraph/colors/maps/CET-C7s.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBC1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBC2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBD1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBL1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBL2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBTC1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBTC2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBTD1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBTL1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-CBTL2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D10.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D11.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D12.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D13.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D1A.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D3.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D4.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D6.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D7.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D8.csv",
+    "_internal/pyqtgraph/colors/maps/CET-D9.csv",
+    "_internal/pyqtgraph/colors/maps/CET-I1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-I2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-I3.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L10.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L11.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L12.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L13.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L14.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L15.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L16.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L17.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L18.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L19.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L3.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L4.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L5.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L6.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L7.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L8.csv",
+    "_internal/pyqtgraph/colors/maps/CET-L9.csv",
+    "_internal/pyqtgraph/colors/maps/CET-R1.csv",
+    "_internal/pyqtgraph/colors/maps/CET-R2.csv",
+    "_internal/pyqtgraph/colors/maps/CET-R3.csv",
+    "_internal/pyqtgraph/colors/maps/CET-R4.csv",
+    "_internal/pyqtgraph/colors/maps/cividis.csv",
+    "_internal/pyqtgraph/colors/maps/inferno.csv",
+    "_internal/pyqtgraph/colors/maps/magma.csv",
+    "_internal/pyqtgraph/colors/maps/plasma.csv",
+    "_internal/pyqtgraph/colors/maps/turbo.csv",
+    "_internal/pyqtgraph/colors/maps/viridis.csv"
+  ],
+  "qt_libraries": [
+    "_internal/PySide6/Qt6Core.dll",
+    "_internal/PySide6/Qt6Gui.dll",
+    "_internal/PySide6/Qt6Network.dll",
+    "_internal/PySide6/Qt6OpenGL.dll",
+    "_internal/PySide6/Qt6OpenGLWidgets.dll",
+    "_internal/PySide6/Qt6Pdf.dll",
+    "_internal/PySide6/Qt6Qml.dll",
+    "_internal/PySide6/Qt6QmlMeta.dll",
+    "_internal/PySide6/Qt6QmlModels.dll",
+    "_internal/PySide6/Qt6QmlWorkerScript.dll",
+    "_internal/PySide6/Qt6Quick.dll",
+    "_internal/PySide6/Qt6Svg.dll",
+    "_internal/PySide6/Qt6SvgWidgets.dll",
+    "_internal/PySide6/Qt6Widgets.dll"
+  ],
+  "limits": [
+    "Pattern scanning is not proof of no secrets or a complete vulnerability assessment.",
+    "Distribution mapping uses build-environment metadata; it does not establish every bundled component version or license.",
+    "Third-party binary strings are not exhaustively decoded; raw candidate values are never printed."
+  ]
+}

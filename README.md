@@ -2,6 +2,8 @@
 
 An independent local Windows desktop application for analyzing user-supplied US music chart CSV/XLSX observations. Metrics are derived only from imported rows; they are not official platform totals and do not imply complete historical coverage. The application is not affiliated with or endorsed by Spotify.
 
+Current engineering evidence: [Phase 9 QA and release assessment](docs/PHASE_9_ENGINEERING_QA.md). Client instructions: [version 0.1.0 user guide](docs/USER_GUIDE.md). A Windows installer is built and tested on the developer host; clean-machine verification, signing/license review, and the client's historical-data decision remain outstanding.
+
 ## Setup
 
 Requires Python 3.12 or newer for source development.

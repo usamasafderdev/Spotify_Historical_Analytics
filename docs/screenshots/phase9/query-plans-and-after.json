@@ -1,0 +1,98 @@
+[
+  {
+    "rows": 25000,
+    "query_ms": {
+      "summary": 34.07,
+      "songs": 70.79,
+      "artists": 41.27
+    },
+    "plans": {
+      "summary": [
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "SEARCH chart_records USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)"
+      ],
+      "songs": [
+        "SEARCH chart_records USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "artists": [
+        "MATERIALIZE supplied",
+        "SCAN track_artists USING INDEX sqlite_autoindex_track_artists_1",
+        "SEARCH c USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)",
+        "SEARCH ta USING AUTOMATIC COVERING INDEX (track_id=?) LEFT-JOIN",
+        "SEARCH a USING INDEX sqlite_autoindex_artists_1 (artist_id=?) LEFT-JOIN",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ]
+    }
+  },
+  {
+    "rows": 100000,
+    "query_ms": {
+      "summary": 144.83,
+      "songs": 257.56,
+      "artists": 181.79
+    },
+    "plans": {
+      "summary": [
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "SEARCH chart_records USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)"
+      ],
+      "songs": [
+        "SEARCH chart_records USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "artists": [
+        "MATERIALIZE supplied",
+        "SCAN track_artists USING INDEX sqlite_autoindex_track_artists_1",
+        "SEARCH c USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)",
+        "SEARCH ta USING AUTOMATIC COVERING INDEX (track_id=?) LEFT-JOIN",
+        "SEARCH a USING INDEX sqlite_autoindex_artists_1 (artist_id=?) LEFT-JOIN",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ]
+    }
+  },
+  {
+    "rows": 500000,
+    "query_ms": {
+      "summary": 881.79,
+      "songs": 1277.12,
+      "artists": 853.4
+    },
+    "plans": {
+      "summary": [
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "SEARCH chart_records USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)"
+      ],
+      "songs": [
+        "SEARCH chart_records USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "artists": [
+        "MATERIALIZE supplied",
+        "SCAN track_artists USING INDEX sqlite_autoindex_track_artists_1",
+        "SEARCH c USING COVERING INDEX idx_chart_records_real_analytics (country=? AND chart_type=?)",
+        "SEARCH ta USING AUTOMATIC COVERING INDEX (track_id=?) LEFT-JOIN",
+        "SEARCH a USING INDEX sqlite_autoindex_artists_1 (artist_id=?) LEFT-JOIN",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR count(DISTINCT)",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ]
+    }
+  }
+]

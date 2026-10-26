@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -182,6 +184,7 @@ class ExportWorker(QObject):
         chart_type: str,
         limit: int,
         search: str | None,
+        include_demo: bool = False,
     ) -> None:
         super().__init__()
         self.db_path = db_path
@@ -192,6 +195,7 @@ class ExportWorker(QObject):
         self.chart_type = chart_type
         self.limit = limit
         self.search = search
+        self.include_demo = include_demo
 
     @Slot()
     def run(self) -> None:
@@ -208,6 +212,7 @@ class ExportWorker(QObject):
                 self.chart_type,
                 self.limit,
                 self.search,
+                include_demo=self.include_demo,
             )
             self.completed.emit(
                 {"destination": self.destination, "row_count": row_count}
@@ -223,6 +228,7 @@ class ExportWorker(QObject):
 class DashboardQueryWorker(QObject):
     completed = Signal(object)
     failed = Signal(object)
+    cancelled = Signal()
 
     def __init__(
         self,
@@ -254,12 +260,20 @@ class DashboardQueryWorker(QObject):
         self.artist_limit = artist_limit
         self.album_limit = album_limit
         self.include_demo = include_demo
+        self.cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
 
     @Slot()
     def run(self) -> None:
         db = None
         try:
             db = DatabaseManager(Path(self.db_path))
+            db.connection.set_progress_handler(lambda: int(self.cancel_event.is_set()), 1000)
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+                return
             analytics = AnalyticsService(db)
             all_songs = db.get_top_tracks(
                 limit=max(10, self.song_limit),
@@ -323,10 +337,16 @@ class DashboardQueryWorker(QObject):
                 ),
                 "mapping_summary": db.get_metadata_mapping_summary(),
             }
-            self.completed.emit(result)
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                self.completed.emit(result)
         except Exception as exc:
-            LOGGER.exception("Background dashboard query failed.")
-            self.failed.emit((self.generation, str(exc)))
+            if self.cancel_event.is_set():
+                self.cancelled.emit()
+            else:
+                LOGGER.exception("Background dashboard query failed.")
+                self.failed.emit((self.generation, str(exc)))
         finally:
             if db is not None:
                 db.close()

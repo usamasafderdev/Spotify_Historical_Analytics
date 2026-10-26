@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -52,10 +54,11 @@ def _ranking_rows(
     chart_type: str,
     limit: int,
     search: str | None,
+    include_demo: bool = False,
 ) -> list[dict[str, Any]]:
     if category == "songs":
         rows = db.get_top_tracks(
-            limit, start_date, end_date, chart_type=chart_type, search=search
+            limit, start_date, end_date, chart_type=chart_type, search=search, include_demo=include_demo
         )
         return [
             {
@@ -71,7 +74,7 @@ def _ranking_rows(
         ]
     if category == "artists":
         rows = db.get_artist_summary(
-            start_date, end_date, chart_type=chart_type, limit=limit, search=search
+            start_date, end_date, chart_type=chart_type, limit=limit, search=search, include_demo=include_demo
         )
         return [
             {
@@ -90,7 +93,7 @@ def _ranking_rows(
         ]
     if category == "albums":
         rows = db.get_album_rankings(
-            start_date, end_date, chart_type, limit=limit, search=search
+            start_date, end_date, chart_type, limit=limit, search=search, include_demo=include_demo
         )
         return [
             {
@@ -119,18 +122,19 @@ def _report_metadata(
     chart_type: str,
     search: str | None,
     limit: int,
+    include_demo: bool = False,
 ) -> tuple[list[tuple[str, str]], list[dict[str, Any]]]:
-    bounds = db.get_available_date_bounds(chart_type=chart_type)
+    bounds = db.get_available_date_bounds(chart_type=chart_type, include_demo=include_demo)
     effective_start = start_date or bounds["earliest"]
     effective_end = end_date or bounds["latest"]
-    summary = db.get_summary(start_date, end_date, chart_type=chart_type)
-    inventory = db.get_data_inventory()
+    summary = db.get_summary(start_date, end_date, chart_type=chart_type, include_demo=include_demo)
+    inventory = db.get_data_inventory(include_demo=include_demo)
     selected_sources = [
         source
         for source in inventory["sources"]
         if source["country"] == "US"
         and source["chart_type"] == chart_type
-        and not source["is_demo"]
+        and (include_demo or not source["is_demo"])
         and (effective_start is None or source["latest"] >= effective_start)
         and (effective_end is None or source["earliest"] <= effective_end)
     ]
@@ -152,7 +156,7 @@ def _report_metadata(
         ("Rows exported", str(len(rows))),
         ("Source names", "; ".join(source_names) or "No matching real-data sources"),
         ("Source completeness", "Unverified; missing dates are not treated as zero streams."),
-        ("Synthetic data", "Excluded from this real-data export."),
+        ("Synthetic data", "DEMO / SYNTHETIC DATA included; generated fixture, not real observations." if include_demo else "Excluded from this real-data export."),
     ]
     return metadata, selected_sources
 
@@ -190,6 +194,7 @@ def export_rankings(
     chart_type: str,
     limit: int,
     search: str | None = None,
+    include_demo: bool = False,
 ) -> int:
     db.validate_date_range(start_date, end_date)
     category = category.lower()
@@ -197,15 +202,25 @@ def export_rankings(
     suffix = path.suffix.lower()
     if suffix not in {".csv", ".xlsx"}:
         raise ValueError("Exports must use a .csv or .xlsx destination.")
-    rows = _ranking_rows(db, category, start_date, end_date, chart_type, limit, search)
-    metadata, sources = _report_metadata(
-        db, category, rows, start_date, end_date, chart_type, search, limit
-    )
-    if suffix == ".csv":
-        _write_csv(path, RANKING_COLUMNS[category], rows, metadata, sources)
-    else:
-        _write_xlsx(path, RANKING_COLUMNS[category], rows, metadata, sources)
+    with db.transaction():
+        rows = _ranking_rows(db, category, start_date, end_date, chart_type, limit, search, include_demo)
+        metadata, sources = _report_metadata(
+            db, category, rows, start_date, end_date, chart_type, search, limit, include_demo
+        )
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.stem}.", suffix=suffix, delete=False) as handle:
+            temporary = Path(handle.name)
+        if suffix == ".csv":
+            _write_csv(temporary, RANKING_COLUMNS[category], rows, metadata, sources)
+        else:
+            _write_xlsx(temporary, RANKING_COLUMNS[category], rows, metadata, sources)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return len(rows)
+
 
 
 def _write_csv(
@@ -257,6 +272,12 @@ def _style_sheet(sheet: Any) -> None:
         values = [str(cell.value or "") for cell in column_cells]
         width = min(max(max(map(len, values), default=10) + 2, 12), 60)
         sheet.column_dimensions[get_column_letter(column_cells[0].column)].width = width
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = "#,##0"
+            else:
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
     sheet.sheet_view.showGridLines = False
 
 

@@ -4,6 +4,7 @@ import csv
 import gzip
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 from pathlib import Path
@@ -70,14 +71,18 @@ def _parse_date(value: object) -> str | None:
 
 
 def _as_int(value: object) -> int | None:
-    text = _as_text(value).replace(",", "")
+    text = _as_text(value)
     if not text:
         return None
-    try:
-        number = float(text)
-    except ValueError:
+    if "," in text and not re.fullmatch(r"-?\d{1,3}(?:,\d{3})+(?:\.0+)?", text):
         return None
-    if not number.is_integer():
+    try:
+        number = Decimal(text.replace(",", ""))
+    except InvalidOperation:
+        return None
+    if not number.is_finite() or number != number.to_integral_value():
+        return None
+    if number < -(2 ** 63) or number >= 2 ** 63:
         return None
     return int(number)
 

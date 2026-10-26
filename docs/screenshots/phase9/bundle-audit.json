@@ -1,0 +1,25 @@
+{
+  "pyz_modules": 2502,
+  "import_dialog_present": true,
+  "import_wizard_present": false,
+  "virtual_keyboard_present": false,
+  "historical_data_files": [],
+  "upstream_pyqtgraph_colormap_csv": 69,
+  "qt_dlls": [
+    "_internal/PySide6/Qt6Core.dll",
+    "_internal/PySide6/Qt6Gui.dll",
+    "_internal/PySide6/Qt6Network.dll",
+    "_internal/PySide6/Qt6OpenGL.dll",
+    "_internal/PySide6/Qt6OpenGLWidgets.dll",
+    "_internal/PySide6/Qt6Pdf.dll",
+    "_internal/PySide6/Qt6Qml.dll",
+    "_internal/PySide6/Qt6QmlMeta.dll",
+    "_internal/PySide6/Qt6QmlModels.dll",
+    "_internal/PySide6/Qt6QmlWorkerScript.dll",
+    "_internal/PySide6/Qt6Quick.dll",
+    "_internal/PySide6/Qt6Svg.dll",
+    "_internal/PySide6/Qt6SvgWidgets.dll",
+    "_internal/PySide6/Qt6Widgets.dll"
+  ],
+  "notice_files": 45
+}

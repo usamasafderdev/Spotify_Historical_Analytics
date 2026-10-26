@@ -1,0 +1,15 @@
+﻿{
+    "clean_vm":  false,
+    "desktop_shortcut":  true,
+    "upgrade_preserved":  true,
+    "qa_app_id":  "{{EB7C2FA5-B93B-4AF7-833D-DA907E77A019}",
+    "start_menu":  true,
+    "path_without_python":  true,
+    "qa_root":  "D:\\Study Material\\University\\Spotify Historical Analytics\\build\\phase9\\installer-qa",
+    "install":  true,
+    "user_data_retained":  true,
+    "uninstall":  true,
+    "package_upgrade":  "0.1.0 to 0.1.0.1 (same application payload)",
+    "exports":  true,
+    "demo":  true
+}
