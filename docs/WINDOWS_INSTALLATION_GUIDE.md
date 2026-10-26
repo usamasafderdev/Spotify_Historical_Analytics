@@ -1,5 +1,9 @@
 # Windows Installation and Data Guide
 
+Current final acceptance and the local review-folder contents are recorded in
+[Phase 10 release acceptance](PHASE_10_RELEASE_ACCEPTANCE.md). Client delivery
+is still blocked; follow the [final checklist](FINAL_CLIENT_HANDOVER_CHECKLIST.md).
+
 Phase 9 produced `dist\installer\US-Music-Charts-Analytics-Setup.exe` using the
 already-installed Inno Setup 6.7.3. A separate QA product identity and workspace
 installation path were used for host install, shortcut, no-Python-on-PATH launch,
@@ -10,7 +14,15 @@ and final client delivery is not approved.
 
 ## Client installation
 
-The release candidate is a per-user x64 application. If an installer has been compiled and approved, run `US-Music-Charts-Analytics-Setup.exe` from its verified release location. Windows may show an unsigned-publisher/SmartScreen warning because this build is not code-signed; do not bypass security controls unless the organization's normal software approval process explicitly authorizes the file.
+The release candidate is a per-user x64 application. Run `US-Music-Charts-Analytics-Setup.exe` only after it has been approved for use. This build is unsigned; follow the organization's software approval process and do not disable SmartScreen or Defender.
+
+Before installation, compare the SHA-256 to the accompanying checksum file and the approved release record:
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\US-Music-Charts-Analytics-Setup.exe
+```
+
+A matching hash confirms the file matches that record; it does not establish publisher trust or security approval.
 
 The installer targets the current user's Programs folder, creates a Start Menu shortcut, and offers an optional Desktop shortcut. It should not need administrator elevation. The uninstall entry is registered with Windows. Uninstall removes the application files but intentionally leaves data under Local AppData.
 

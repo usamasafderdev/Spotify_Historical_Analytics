@@ -42,13 +42,22 @@ def main():
         content = content.replace("PHASE_10_SECURITY_AND_LICENSE_REVIEW.md", "DEPENDENCY_AND_SECURITY_REVIEW.md")
         (DESTINATION / name).write_text(content, encoding="utf-8")
     notices = DESTINATION / "notices"
-    shutil.copytree(ROOT / "dist/USMusicChartsAnalytics/_internal/notices", notices, dirs_exist_ok=True)
+    shutil.copytree(ROOT / "dist/USMusicChartsAnalytics/_internal/notices", notices, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.py", "*.pyc", "*.pyo", "*.pyd", "*.dll", "*.exe"))
     supplemental = []
     for name in sorted({row["distribution"] for row in audit["installed_distribution_mapping"]}):
         dist = metadata.distribution(name)
         copied = []
         for file in dist.files or ():
             if not any(part.lower().startswith(("license", "licence", "copying", "notice")) for part in file.parts):
+                continue
+            # Some libraries have executable SPDX lookup packages named `licenses`.
+            # Their Python sources/bytecode are not redistribution notice documents.
+            leaf = Path(str(file))
+            if leaf.suffix.lower() in {".py", ".pyc", ".pyo", ".pyd", ".dll", ".exe", ".key", ".pem"}:
+                continue
+            if (leaf.suffix.lower() not in {"", ".txt", ".md", ".rst", ".html", ".htm", ".license"}
+                    and not leaf.name.lower().startswith(("license", "licence", "copying", "notice"))):
                 continue
             source = Path(dist.locate_file(file))
             if not source.is_file():
@@ -68,7 +77,7 @@ def main():
                              "scope": "Candidate from bundled module roots; shared namespaces can map to distributions not shipped in full."})
     (notices / "SUPPLEMENTAL_INVENTORY.json").write_text(json.dumps(supplemental, indent=2), encoding="utf-8")
     (notices / "REVIEW_REQUIRED.md").write_text(
-        "# Notice review required\n\nCore notices are copied from the exact frozen bundle. Supplemental files were collected from installed distribution records associated with bundled module roots. Shared namespaces can over-identify distributions. These files do not constitute a complete native-library/transitive SBOM or legal clearance.\n\n"
+        "# Notice review required\n\nCore notice documents and inventories are copied from the frozen bundle. Python sources/bytecode in license-lookup namespaces are excluded from this companion folder; the original inventory describes the frozen bundle and may list excluded non-document files. Supplemental text documents were collected from installed distribution records associated with bundled module roots. Shared namespaces can over-identify distributions. These files do not constitute a complete native-library/transitive SBOM or legal clearance.\n\n"
         "Complete the per-component license determination, required license texts/notices, corresponding-source or valid source-offer materials, and library replacement/relinking instructions before redistribution. Qt wheel commercial-license references alone do not satisfy an LGPL release. Review Windows runtime/OpenSSL/libffi/SQLite and vendored component materials as applicable. No client delivery is approved.\n", encoding="utf-8")
     version = {"application": "US Music Charts Analytics", "version": freeze["version"],
                "database_schema_user_version": freeze["schema_user_version"],

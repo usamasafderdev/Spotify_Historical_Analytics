@@ -1,0 +1,16 @@
+{
+  "entry_scripts": [
+    "pyiboot01_bootstrap",
+    "pyi_rth_inspect",
+    "pyi_rth_pkgutil",
+    "pyi_rth_multiprocessing",
+    "pyi_rth_pyqtgraph_multiprocess",
+    "pyi_rth_pyside6",
+    "pyi_rth_traitlets",
+    "pyi_rth_setuptools",
+    "pyi_rth_cryptography_openssl",
+    "windows_entry"
+  ],
+  "developer_path_matches": [],
+  "scope": "Entry/bootstrap code objects and string constants only"
+}

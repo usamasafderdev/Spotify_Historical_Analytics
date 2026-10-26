@@ -1,0 +1,18 @@
+{
+  "application_version": "0.1.0",
+  "production_schema_user_version": 2,
+  "fresh_tests": 155,
+  "test_duration_seconds": 236.62,
+  "compileall": "PASS",
+  "diff_check": "PASS",
+  "artifact_freeze": "PASS",
+  "clean_vm": "BLOCKED",
+  "physical_dpi": "NOT TESTED",
+  "manual_desktop": "PARTIAL",
+  "licensing_clearance": "BLOCKED",
+  "client_delivery": "BLOCKED",
+  "sent_or_published": false,
+  "entry_git_head": "12e9286825d2ca3e8342a0b486aa33e24fb6b2d5",
+  "final_git_head": "9631de5b78e8588f96fa6c34b0a3865291103a68",
+  "git_head_changed_in_shared_workspace": true
+}

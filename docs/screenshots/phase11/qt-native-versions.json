@@ -1,0 +1,72 @@
+[
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6Core.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6Gui.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6Network.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6OpenGL.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6OpenGLWidgets.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.140.0.0",
+    "name": "Qt6Pdf.dll",
+    "file_version": "6.140.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6Qml.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6QmlMeta.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6QmlModels.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6QmlWorkerScript.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6Quick.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6Svg.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6SvgWidgets.dll",
+    "file_version": "6.12.0.0"
+  },
+  {
+    "product_version": "6.12.0.0",
+    "name": "Qt6Widgets.dll",
+    "file_version": "6.12.0.0"
+  }
+]

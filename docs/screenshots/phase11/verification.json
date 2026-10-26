@@ -1,0 +1,45 @@
+{
+  "version": "0.1.0",
+  "artifacts": [
+    {
+      "path": "dist/USMusicChartsAnalytics/USMusicChartsAnalytics.exe",
+      "bytes": 19603761,
+      "sha256": "6710EB8DF605308F1F244D9A4D8B60EC1730BD35132258B47C6CC8C2EC5ECF32",
+      "signing": "NotSigned"
+    },
+    {
+      "path": "dist/installer/US-Music-Charts-Analytics-Setup.exe",
+      "bytes": 77826840,
+      "sha256": "0D36E4A234D5425EF086EF8E2AE65EA5B184C3AF65205E4D63010473303C8D8D",
+      "signing": "NotSigned"
+    }
+  ],
+  "binary_rebuild_performed": false,
+  "production_source_changed": false,
+  "production_data_changed": false,
+  "portable_and_phase10_handover_manifests": "PASS",
+  "vm_availability": "BLOCKED",
+  "clean_install_lifecycle": "NOT TESTED",
+  "actual_windows_gui": "PARTIAL - packaged widget automation and inspected captures",
+  "physical_dpi_matrix": "NOT TESTED except PARTIAL current host baseline",
+  "current_host_pixels": [
+    1920,
+    1080
+  ],
+  "current_windows_window_dpi": 144,
+  "qt_scale_override_removed_for_display_observation": true,
+  "display_settings_changed": false,
+  "targeted_tests": {
+    "passed": 52,
+    "seconds": 4.11
+  },
+  "prior_full_suite": {
+    "phase": 10,
+    "passed": 155
+  },
+  "dependency_clearance": "BLOCKED",
+  "client_data_scope": "BLOCKED",
+  "human_delivery_approved": false,
+  "sent_or_purchased": false,
+  "document_links": "PASS"
+}

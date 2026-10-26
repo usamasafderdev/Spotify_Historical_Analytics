@@ -1,0 +1,18 @@
+{
+  "daily": {
+    "chart_streams": 220,
+    "imported_rows": 2,
+    "usa_only": true,
+    "positions_ids_reporting_dates_preserved": true,
+    "artist_album_mappings": true
+  },
+  "weekly": {
+    "chart_streams": 900,
+    "imported_rows": 1,
+    "usa_only": true,
+    "positions_ids_reporting_dates_preserved": true,
+    "artist_album_mappings": true
+  },
+  "research_or_production_database_used": false,
+  "fixture": "explicitly generated synthetic, not historical observations"
+}

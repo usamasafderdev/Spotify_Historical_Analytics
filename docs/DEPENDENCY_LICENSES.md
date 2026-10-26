@@ -1,5 +1,10 @@
 # Third-Party Dependency and License Checklist
 
+Phase 10 found additional bundled optional module roots beyond this earlier
+core inventory. See [the current security/license review](PHASE_10_SECURITY_AND_LICENSE_REVIEW.md).
+Available supplemental notices are prepared in the local review handover folder;
+redistribution clearance remains blocked pending human per-component review.
+
 ## Phase 9 release inventory and review
 
 `scripts/write_release_notices.py` now collects exact core distribution metadata,

@@ -1,0 +1,88 @@
+{
+  "application_version": "0.1.0",
+  "schema_user_version": 2,
+  "test_passed": 155,
+  "test_duration_seconds": 236.62,
+  "items": [
+    {
+      "item": "Version / schema freeze",
+      "status": "PASS",
+      "result": "Application 0.1.0, production schema 2; original EXE/Setup hashes retained."
+    },
+    {
+      "item": "Independent analytics acceptance",
+      "status": "PASS",
+      "result": "155 fresh tests include independent Python arithmetic, collaborators, editions, boundaries, cadences, duplicates, search and reopened reports."
+    },
+    {
+      "item": "Packaged GUI automation",
+      "status": "PASS",
+      "result": "Frozen EXE: all seven pages, demo, filters, search/sort, details, backup/settings and return to empty data at three window constraints."
+    },
+    {
+      "item": "Manual desktop acceptance",
+      "status": "PARTIAL",
+      "result": "Windows Qt/actual HWND captures were opened and inspected; manual mouse/keyboard/focus/calendar/hover/zoom and shell-chooser checks remain."
+    },
+    {
+      "item": "Clean Windows VM lifecycle",
+      "status": "BLOCKED",
+      "result": "No configured authorized clean VM/tool was found; actual production Setup install/reinstall/Start Menu launch on a clean OS is pending."
+    },
+    {
+      "item": "Physical Windows DPI",
+      "status": "NOT TESTED",
+      "result": "No display mode/scaling setting changed; current checks are window constraints at host Qt DPR 1.5. Earlier Qt simulation is not physical DPI proof."
+    },
+    {
+      "item": "Import / export acceptance",
+      "status": "PASS",
+      "result": "Packaged fixture imports one observation, skips one duplicate, rejects two; 12 parsed demo reports per window run; schema example totals 220 and repeat adds zero."
+    },
+    {
+      "item": "Fresh automated suite",
+      "status": "PASS",
+      "result": "155 passed in 236.62 seconds; syntax compilation and diff checks passed."
+    },
+    {
+      "item": "Installer artifact / lifecycle",
+      "status": "PARTIAL",
+      "result": "Exact frozen Setup exists and hash matches. Phase 9 isolated host lifecycle applies to same payload; independent clean-machine lifecycle remains blocked."
+    },
+    {
+      "item": "Installer checksum",
+      "status": "PASS",
+      "result": "SHA-256 0D36E4A234D5425EF086EF8E2AE65EA5B184C3AF65205E4D63010473303C8D8D."
+    },
+    {
+      "item": "Security review",
+      "status": "PARTIAL",
+      "result": "Scoped credential/path checks found no application candidates; parameterized imports, formula escaping and rollback checked. Not a full vulnerability assessment."
+    },
+    {
+      "item": "Dependency redistribution clearance",
+      "status": "BLOCKED",
+      "result": "Core notices incomplete for all optional/native/transitive components; companion available notices prepared. Qt license/source/replacement obligations need human review."
+    },
+    {
+      "item": "Authenticode / publisher policy",
+      "status": "PARTIAL",
+      "result": "Both artifacts NotSigned; legitimate signing or explicit customer-policy acceptance remains pending."
+    },
+    {
+      "item": "Documentation / handover preparation",
+      "status": "PASS",
+      "result": "User guide updated; schema, update/install instructions, limitations, checklist, notices and QA summary prepared locally."
+    },
+    {
+      "item": "Historical data dependency",
+      "status": "BLOCKED",
+      "result": "Client bundled-history versus client-import decision and source rights/coverage acceptance remain pending. No historical data bundled."
+    },
+    {
+      "item": "Final client delivery readiness",
+      "status": "BLOCKED",
+      "result": "Resolve data, clean-OS, human desktop acceptance and redistribution gates; nothing sent to the client."
+    }
+  ]
+}

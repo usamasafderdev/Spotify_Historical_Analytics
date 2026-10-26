@@ -1,0 +1,10 @@
+{
+  "handover_manifest": "PASS",
+  "bundle_manifest": "PASS",
+  "original_artifacts_unchanged": true,
+  "root_markdown_links": "PASS",
+  "raw_logs_or_chart_databases_in_handover": false,
+  "common_credential_or_private_workspace_matches": 0,
+  "handover_files_including_manifest": 170,
+  "release_status": "BLOCKED - INTERNAL REVIEW ONLY"
+}

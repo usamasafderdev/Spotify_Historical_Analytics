@@ -1,0 +1,12 @@
+{
+  "platform": "windows",
+  "qt_device_pixel_ratio": 1.5,
+  "windows_screen_pixels": [
+    1920,
+    1080
+  ],
+  "windows_window_dpi": 144,
+  "qt_scale_override_removed_for_read": true,
+  "display_configuration_changed": false,
+  "scope": "Read-only current-host observation; no physical resolution/scaling matrix or manual interaction acceptance."
+}

@@ -1,0 +1,72 @@
+{
+  "existing_config_checks": [
+    {
+      "exists": false,
+      "path": "%USERPROFILE%\\.VirtualBox\\VirtualBox.xml"
+    },
+    {
+      "exists": false,
+      "path": "%USERPROFILE%\\Documents\\Virtual Machines"
+    },
+    {
+      "exists": false,
+      "path": "%USERPROFILE%\\Documents\\Hyper-V"
+    }
+  ],
+  "manufacturer": "HP",
+  "privileged_changes": false,
+  "hyperv_query": "Invalid namespace ",
+  "commands": [
+    {
+      "tool": "WindowsSandbox.exe",
+      "found": false
+    },
+    {
+      "tool": "vmconnect.exe",
+      "found": false
+    },
+    {
+      "tool": "VBoxManage.exe",
+      "found": false
+    },
+    {
+      "tool": "vmrun.exe",
+      "found": false
+    },
+    {
+      "tool": "Get-VM",
+      "found": false
+    }
+  ],
+  "status": "BLOCKED - no usable authorized clean test environment discovered",
+  "model": "HP EliteBook 830 G8 Notebook PC",
+  "hypervisor_present": true,
+  "executables": [
+    {
+      "exists": false,
+      "path": "C:\\WINDOWS\\System32\\WindowsSandbox.exe"
+    },
+    {
+      "exists": false,
+      "path": "C:\\WINDOWS\\System32\\vmconnect.exe"
+    },
+    {
+      "exists": false,
+      "path": "C:\\Program Files\\Oracle\\VirtualBox\\VBoxManage.exe"
+    },
+    {
+      "exists": false,
+      "path": "C:\\Program Files\\VMware\\VMware Workstation\\vmrun.exe"
+    },
+    {
+      "exists": false,
+      "path": "%USERPROFILE%\\AppData\\Local\\Programs\\Oracle\\VirtualBox\\VBoxManage.exe"
+    }
+  ],
+  "services": [
+    {
+      "name": "vmcompute",
+      "status": "Stopped"
+    }
+  ]
+}
