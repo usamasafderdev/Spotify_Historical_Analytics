@@ -23,9 +23,17 @@ The one successfully downloaded pinned source (Dhruvil Dave v85) produced US can
 
 The audit found 12 calendar-step gap candidates across these series. A gap is not a zero-stream record, and the expected publication schedule is unverified. This pinned version contains no staged observations for 2022–2026; that does not establish data absence from all sources. No coverage year is declared complete.
 
-The 455,031 staged rows contain 14,649 distinct track IDs derived from verified Spotify track URL syntax. No artist IDs, album IDs, or album mappings were present in the inspected file. The data came from one source only, so cross-source overlap/conflict validation could not be performed.
+The 455,031 v85 staged rows contain 14,649 distinct track IDs derived from verified Spotify track URL syntax. No artist IDs, album IDs, or album mappings were present in that file. Phase 6B later compared its Top 200 observations with MGD+ by date, stable track ID, and rank; 363,785 keys overlapped and all shared stream values matched. The sources are not assumed independent or authoritative, and no source-precedence decision was made.
 
 The report separates source, category, cadence, raw chart name, first/last observed date, row counts, distinct dates, identifiable track/artist/album counts, stream availability, and source permission state. Years 2017–2026 without staged rows are explicitly labeled `NO_VALIDATED_OBSERVATIONS`; that means no validated rows were staged, not that the source contains no data.
+
+## Phase 6B: Zenodo MGD+ audit (research only)
+
+The downloaded MGD+ archive's US regional chart member contains Top 200 observations from 2017-01-01 through 2022-03-13. It has 378,800 rows on 1,893 dates, no missing/invalid stream values, and no Viral 50 chart file. Five calendar-step gap candidates occur within the observed span. The date 2021-09-01 has 400 rows, including 200 repeated date/track-ID/rank identities; those duplicate identities have no stream-value conflicts. This is a quality finding, not a claim about the provider's expected publication schedule.
+
+The MGD+ source and Dhruvil v85 share 363,785 date/track-ID/rank keys over 2017–2021, with equal stream values for every shared key. The MGD+ file contains early-2022 rows; it does not cover the remainder of 2022 through 2026. A matching overlapping value is not proof of source independence, accuracy, completeness, or use rights.
+
+MGD+ was downloaded and CRC-checked, but was not extracted, imported into research staging, or copied to production. The Zenodo record's CC BY 4.0 metadata does not resolve upstream Spotify content rights or commercial derived-analytics permission. The machine-readable audit and month-by-month report are in the external `reports\phase6b_zenodo_audited\` directory; see [PHASE_6B_RESULTS.md](./PHASE_6B_RESULTS.md) for the full measurements.
 
 ## Interpretation limits
 

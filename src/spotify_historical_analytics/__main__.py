@@ -53,6 +53,7 @@ def main() -> int:
 
     try:
         smoke_test = "--smoke-test" in sys.argv
+        demo_smoke_test = "--demo-smoke-test" in sys.argv
         if not smoke_test and not DB_PATH.exists():
             legacy_path = next(
                 (path for path in legacy_database_candidates() if path.is_file()),
@@ -97,7 +98,40 @@ def main() -> int:
                 )
             return 1
         window.show()
-        if smoke_test:
+
+        if demo_smoke_test:
+            def verify_demo_dashboard() -> None:
+                visible_demo = (
+                    window._demo_mode
+                    and window.demo_banner.isVisible()
+                    and all(widget.value.text() not in {"—", "0", "0.0%"} for widget in window.kpis)
+                    and window.songs_table.rowCount() > 0
+                    and window.artist_table.rowCount() > 0
+                    and window.album_table.rowCount() > 0
+                    and bool(window.streams_chart.plot.listDataItems())
+                    and bool(window.top_songs_chart.plot.listDataItems())
+                )
+                if visible_demo:
+                    LOGGER.info(
+                        "Demo UI smoke test passed: KPI cards, songs, artists, albums, and charts are populated."
+                    )
+                    app.exit(0)
+                else:
+                    LOGGER.error(
+                        "Demo UI smoke test failed: one or more expected synthetic widgets are empty."
+                    )
+                    app.exit(2)
+
+            window.dashboard_updated.connect(verify_demo_dashboard)
+            window.load_demo_data()
+            QTimer.singleShot(
+                20_000,
+                lambda: (
+                    LOGGER.error("Demo UI smoke test timed out."),
+                    app.exit(3),
+                ),
+            )
+        elif smoke_test:
             QTimer.singleShot(5000, window.close)
         return app.exec()
     finally:

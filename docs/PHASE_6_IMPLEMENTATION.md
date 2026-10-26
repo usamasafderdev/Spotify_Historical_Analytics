@@ -18,7 +18,10 @@ The listings do not prove upstream Spotify rights, accurate USA coverage, commer
 - `scripts/download_historical_datasets.py` uses the documented KaggleHub `dataset_download` function with explicit pinned versions, separate cache roots, no force download, an exclusive local lock, reuse checks, and partial-download detection.
 - KaggleHub is installed only through the optional `research` extra. The Windows executable's normal app startup does not import it or require Kaggle credentials.
 - The research SQLite database has independent `staged_files`, `staged_observations`, `staged_rejections`, and version-specific `source_rights` tables. It is not the application database.
-- Staging schema version 3 adds a normalization version to file provenance, explicit week boundaries, and raw-row JSON. Older staging rows migrate in place; records are reprocessed when normalization rules change, and older source approvals are not promoted to a newly versioned source.
+- The current staging schema is version 4 and normalization is version 3. Rejections are aggregated by reason and safe detail values, with bounded diagnostic samples. Existing row-level rejection tables are preserved; completed files with older normalization versions are not silently deleted or reprocessed.
+- `scripts/compact_research_staging.py` rebuilds into a separate sibling database after a free-space preflight, source-checksum check, row reconciliation, and SQLite integrity check. It does not replace the original database.
+- `scripts/audit_mgdplus_archive.py` CRC-checks, inventories, and audits MGD+ members directly from the ZIP without extraction or production import.
+- The latest Kaggle preflight uses an unversioned KaggleHub dataset handle only when an exact-version cache is absent and conservative disk headroom is sufficient. A failed preflight never calls KaggleHub.
 - CSV/CSV.GZ, Parquet, XLSX/XLSM and JSONL are read in bounded batches. Raw rows are retained in staging; source files are left untouched. Archives are CRC-checked and inventoried without a second full extracted copy.
 - Coverage and overlap summaries are computed with SQLite aggregates and streamed to CSV; the report step does not materialize all staged observations in Python memory.
 - Per-file audit rows record measured processing seconds and sampled process peak RSS when the chart schema is supported. These figures are local measurements, not performance guarantees.
@@ -41,10 +44,22 @@ The schema-v3 per-file audit elapsed time was 600.18 seconds, including hashing,
 
 The research staging SQLite file measured 13,912,154,112 bytes after storing accepted and rejected source rows. D: had 32,276,529,152 bytes free at that measurement. Research storage is intentionally outside the application database and repository.
 
+## Phase 6B findings (2026-10-26)
+
+The original v85 `charts.csv` was reprocessed into `staging\research_staging_compact.sqlite` under the external research root. The source file SHA-256 remained `8238a106f723af9b1d3b857b78ec43f7147d82472b491c63853bcbcc3c23cb1b`; the compact file reconciled 26,173,514 seen rows to 455,031 accepted and 25,718,483 rejected, and `PRAGMA integrity_check` returned `ok`. The original staging file was not replaced or deleted. Its measured size was 13,912,154,112 bytes; the compact staging file measured 325,226,496 bytes.
+
+The 26 `position_out_of_range:50` rows were inspected: all 26 are `viral50` records at rank 51. They remain rejected; they were not reclassified as Top 200 observations. Other rejections are non-US or unknown-region rows, including 451,793 rows marked `Global`. Top 200 observations in v85 have stream values; Viral 50 rows do not.
+
+The current Kaggle listing metadata reported version 146 and 14,962,095,987 bytes for `gonzalopezgil/spotify-charts-daily-updated`. No matching local cache was found. Available disk space at preflight was 31,576,604,672 bytes; the guard required 47,033,771,609 bytes (3x the listing size plus a 2 GiB reserve). The status was `SKIPPED_INSUFFICIENT_SPACE`; the unversioned KaggleHub request was **not called**, and no download was attempted.
+
+Zenodo record 8086643's 364,603,433-byte `MGDplus.zip` was downloaded to the external research root. Its MD5 matched the record metadata, CRC testing passed, SHA-256 was `93ad6b8dd7e8443fbfbece0d56bf74120073f69b1315706e305b995301e5392a`, and no extraction was performed. Its US regional chart member has Top 200 rows from 2017-01-01 through 2022-03-13, but no Viral chart member. A key-based comparison against v85 found 363,785 shared date/track-ID/rank keys with identical stream values and no stream conflicts; the sources are not thereby established as independent or authoritative.
+
+Machine-readable outputs are outside the repository under `D:\Study Material\University\Spotify-Dataset-Research\reports\phase6b_compact_audit\`, `reports\phase6b_zenodo_audited\`, and `reports\kaggle_latest_download_preflight.json`. The detail and remaining year gaps are documented in [PHASE_6B_RESULTS.md](./PHASE_6B_RESULTS.md), [STAGING_STORAGE_AUDIT.md](./STAGING_STORAGE_AUDIT.md), and [MISSING_YEARS_PLAN.md](./MISSING_YEARS_PLAN.md).
+
 ## Known limitations
 
 - This is a research audit pipeline, not a client-facing Data Management UI.
-- JSON arrays and arbitrary SQLite tables are inventoried but not normalized; JSONL is batch-readable. ZIP archives are integrity-checked and inventoried; the contained files are not yet fed directly into the staging adapter.
+- JSON arrays and arbitrary SQLite tables are inventoried but not normalized; JSONL is batch-readable. ZIP archives are CRC-checked and inventoried; the MGD+ audit reads the selected US chart member in place, but does not import archive contents into staging.
 - Only confirmed field aliases are normalized. Unsupported schemas remain inventory-only or produce explicit validation rejections; no guesses are made from similarly named fields.
 - No source precedence policy is inferred. Conflicts remain unresolved until an owner supplies evidence and a documented decision.
 - Artist and album data remain isolated from song-stream calculations. A future metadata/entity importer must validate exact IDs and metric meaning before wiring those categories into production.

@@ -8,8 +8,10 @@ import re
 import sqlite3
 import sys
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from shutil import disk_usage
 from threading import Event, Thread
 from typing import Any
 
@@ -259,6 +261,161 @@ def download_dataset(spec: DatasetSpec, research_root: Path) -> dict[str, Any]:
         _release_lock(lock_path, descriptor)
 
 
+def download_dataset_latest(
+    spec: DatasetSpec,
+    research_root: Path,
+    *,
+    latest_version: int,
+    listed_size_bytes: int,
+    expansion_factor: int = 3,
+    reserve_bytes: int = 2 * 1024**3,
+) -> dict[str, Any]:
+    if latest_version <= 0 or listed_size_bytes <= 0:
+        raise ValueError("Latest version and listed size must be positive.")
+    if expansion_factor < 1 or reserve_bytes < 0:
+        raise ValueError("The expansion factor must be at least 1 and reserve cannot be negative.")
+    latest_spec = replace(spec, version=latest_version)
+    dataset_root = research_root / spec.research_folder
+    dataset_root.mkdir(parents=True, exist_ok=True)
+    cache_path = _existing_cache(dataset_root, latest_spec)
+    if cache_path is not None:
+        return {
+            "dataset_id": spec.dataset_id,
+            "status": "REUSED_LATEST_CACHE",
+            "version": latest_version,
+            "path": str(cache_path),
+            "unversioned_request": "not_called",
+        }
+    archives = _active_archive_paths(dataset_root, latest_spec)
+    if archives:
+        return {
+            "dataset_id": spec.dataset_id,
+            "status": "SKIPPED_ACTIVE_OR_PARTIAL_DOWNLOAD",
+            "version": latest_version,
+            "path": str(archives[0].parent),
+            "unversioned_request": "not_called",
+        }
+    partials = _partial_downloads(dataset_root)
+    if partials:
+        return {
+            "dataset_id": spec.dataset_id,
+            "status": "SKIPPED_ACTIVE_OR_PARTIAL_DOWNLOAD",
+            "version": latest_version,
+            "path": str(dataset_root),
+            "details": f"{len(partials)} partial marker(s) found; files were not touched.",
+            "unversioned_request": "not_called",
+        }
+
+    required_free_bytes = listed_size_bytes * expansion_factor + reserve_bytes
+    free_bytes = disk_usage(dataset_root).free
+    if free_bytes < required_free_bytes:
+        return {
+            "dataset_id": spec.dataset_id,
+            "status": "SKIPPED_INSUFFICIENT_SPACE",
+            "version": latest_version,
+            "path": str(dataset_root),
+            "listed_size_bytes": listed_size_bytes,
+            "expansion_factor": expansion_factor,
+            "reserve_bytes": reserve_bytes,
+            "required_free_bytes": required_free_bytes,
+            "free_bytes": free_bytes,
+            "unversioned_request": "not_called",
+            "details": (
+                "Conservative storage preflight failed; no KaggleHub download call was made."
+            ),
+        }
+
+    lock_path = research_root / ".locks" / f"{spec.slug}.latest.lock"
+    descriptor = _lock_file(lock_path)
+    if descriptor is None:
+        return {
+            "dataset_id": spec.dataset_id,
+            "status": "SKIPPED_ACTIVE_DOWNLOAD",
+            "version": latest_version,
+            "path": str(dataset_root),
+            "unversioned_request": "not_called",
+        }
+    try:
+        os.environ["KAGGLEHUB_CACHE"] = str(dataset_root)
+        try:
+            version = importlib.metadata.version("kagglehub")
+            from kagglehub import dataset_download
+        except (importlib.metadata.PackageNotFoundError, ImportError) as exc:
+            return {
+                "dataset_id": spec.dataset_id,
+                "status": "DEPENDENCY_MISSING",
+                "version": latest_version,
+                "path": "",
+                "details": _safe_error(exc),
+                "unversioned_request": "not_called",
+            }
+        version_parts = tuple(int(part) for part in version.split(".") if part.isdigit())
+        if version_parts < (1, 0, 3):
+            return {
+                "dataset_id": spec.dataset_id,
+                "status": "KAGGLEHUB_TOO_OLD",
+                "version": latest_version,
+                "path": "",
+                "details": f"Installed KaggleHub {version}; version 1.0.3 or newer is required.",
+                "unversioned_request": "not_called",
+            }
+        try:
+            returned = Path(
+                dataset_download(spec.dataset_id, force_download=False)
+            ).resolve()
+        except Exception as exc:
+            return {
+                "dataset_id": spec.dataset_id,
+                "status": "DOWNLOAD_FAILED",
+                "version": latest_version,
+                "path": "",
+                "details": _safe_error(exc),
+                "unversioned_request": "attempted",
+            }
+        actual_version = returned.name if returned.parent.name == "versions" else ""
+        if not returned.exists():
+            return {
+                "dataset_id": spec.dataset_id,
+                "status": "DOWNLOAD_PATH_MISSING",
+                "version": actual_version,
+                "path": str(returned),
+                "unversioned_request": "attempted",
+            }
+        if actual_version != str(latest_version):
+            return {
+                "dataset_id": spec.dataset_id,
+                "status": "LISTING_VERSION_CHANGED",
+                "version": actual_version,
+                "path": str(returned),
+                "details": (
+                    f"The unversioned request returned {actual_version or 'an unversioned path'}, "
+                    f"but listing metadata reported {latest_version}; no audit was started."
+                ),
+                "unversioned_request": "attempted",
+            }
+        files = [path for path in discover_dataset_files(returned) if path.is_file()]
+        if not files:
+            return {
+                "dataset_id": spec.dataset_id,
+                "status": "NO_DATA_FILES",
+                "version": actual_version,
+                "path": str(returned),
+                "unversioned_request": "attempted",
+            }
+        return {
+            "dataset_id": spec.dataset_id,
+            "status": "DOWNLOADED_OR_CACHE_REUSED",
+            "version": actual_version,
+            "path": str(returned),
+            "file_count": len(files),
+            "unversioned_request": "attempted",
+            "required_free_bytes": required_free_bytes,
+            "free_bytes_at_preflight": free_bytes,
+        }
+    finally:
+        _release_lock(lock_path, descriptor)
+
+
 class MemorySampler:
     def __init__(self, interval: float = 0.2) -> None:
         self.interval = interval
@@ -440,6 +597,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--research-root", type=Path, default=DEFAULT_RESEARCH_ROOT)
     parser.add_argument("--download", action="store_true", help="Attempt one supported KaggleHub download per dataset.")
+    parser.add_argument(
+        "--probe-gonzalo-latest",
+        action="store_true",
+        help="Check cache and disk space, then use KaggleHub's unversioned latest call only if safe.",
+    )
+    parser.add_argument("--latest-version", type=int)
+    parser.add_argument("--latest-size-bytes", type=int)
     parser.add_argument("--audit-only", action="store_true", help="Skip downloads and inspect files already present.")
     parser.add_argument("--chunk-size", type=int, default=50_000)
     return parser.parse_args()
@@ -451,6 +615,36 @@ def main() -> int:
         raise SystemExit("--chunk-size must be a positive integer.")
     root = args.research_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
+    if getattr(args, "probe_gonzalo_latest", False):
+        if args.latest_version is None or args.latest_size_bytes is None:
+            raise SystemExit(
+                "--probe-gonzalo-latest requires --latest-version and --latest-size-bytes "
+                "from a current listing check."
+            )
+        report_dir = root / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "kaggle_latest_download_preflight.json"
+        if report_path.exists():
+            raise FileExistsError(
+                f"Refusing to overwrite latest-download report: {report_path}"
+            )
+        result = download_dataset_latest(
+            DATASETS[0],
+            root,
+            latest_version=args.latest_version,
+            listed_size_bytes=args.latest_size_bytes,
+        )
+        payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "listing_version": args.latest_version,
+            "listing_size_bytes": args.latest_size_bytes,
+            "result": result,
+        }
+        report_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8"
+        )
+        print(json.dumps(payload, indent=2, ensure_ascii=True))
+        return 0
     statuses: list[dict[str, Any]] = []
     if args.download and not args.audit_only:
         seen: set[str] = set()

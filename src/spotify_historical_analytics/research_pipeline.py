@@ -8,10 +8,12 @@ import re
 import sqlite3
 import uuid
 import zipfile
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Sequence
+from shutil import disk_usage
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 from urllib.parse import urlsplit
 
 
@@ -20,8 +22,10 @@ APPROVED = "APPROVED"
 RESTRICTED = "RESTRICTED"
 REJECTED = "REJECTED"
 RIGHTS_STATES = {UNVERIFIED, APPROVED, RESTRICTED, REJECTED}
-STAGING_SCHEMA_VERSION = 3
-PROCESSING_VERSION = 2
+STAGING_SCHEMA_VERSION = 4
+PROCESSING_VERSION = 3
+REJECTION_SAMPLE_LIMIT = 20
+RANK_REJECTION_SAMPLE_LIMIT = 100
 
 
 @dataclass(frozen=True)
@@ -388,6 +392,25 @@ def _initialize_staging(connection: sqlite3.Connection) -> None:
             raw_json TEXT NOT NULL,
             UNIQUE(dataset_id, dataset_version, file_sha256, source_row)
         );
+        CREATE TABLE IF NOT EXISTS staged_rejection_counts (
+            dataset_id TEXT NOT NULL,
+            dataset_version INTEGER NOT NULL,
+            file_sha256 TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            rejected_count INTEGER NOT NULL,
+            PRIMARY KEY(dataset_id, dataset_version, file_sha256, reason, detail)
+        );
+        CREATE TABLE IF NOT EXISTS staged_rejection_samples (
+            dataset_id TEXT NOT NULL,
+            dataset_version INTEGER NOT NULL,
+            file_sha256 TEXT NOT NULL,
+            source_row INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            raw_json TEXT NOT NULL,
+            PRIMARY KEY(dataset_id, dataset_version, file_sha256, source_row)
+        );
         CREATE TABLE IF NOT EXISTS source_rights (
             dataset_id TEXT NOT NULL,
             dataset_version INTEGER NOT NULL,
@@ -466,6 +489,8 @@ def process_file(
     *,
     chunk_size: int = 50_000,
     file_sha256: str | None = None,
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    force_reprocess: bool = False,
 ) -> dict[str, int | str]:
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than zero")
@@ -477,17 +502,21 @@ def process_file(
         "WHERE dataset_id=? AND dataset_version=? AND file_sha256=?",
         key,
     ).fetchone()
-    if (
-        current
-        and current[0] == "complete"
-        and current[4] == PROCESSING_VERSION
-    ):
-        return {
-            "status": "reused",
-            "rows_seen": current[1],
-            "rows_accepted": current[2],
-            "rows_rejected": current[3],
-        }
+    if current and current[0] == "complete":
+        if current[4] == PROCESSING_VERSION:
+            return {
+                "status": "reused",
+                "rows_seen": current[1],
+                "rows_accepted": current[2],
+                "rows_rejected": current[3],
+            }
+        if not force_reprocess:
+            return {
+                "status": "reprocess_required",
+                "rows_seen": current[1],
+                "rows_accepted": current[2],
+                "rows_rejected": current[3],
+            }
 
     connection.execute("BEGIN IMMEDIATE")
     connection.execute(
@@ -496,6 +525,14 @@ def process_file(
     )
     connection.execute(
         "DELETE FROM staged_rejections WHERE dataset_id=? AND dataset_version=? AND file_sha256=?",
+        key,
+    )
+    connection.execute(
+        "DELETE FROM staged_rejection_counts WHERE dataset_id=? AND dataset_version=? AND file_sha256=?",
+        key,
+    )
+    connection.execute(
+        "DELETE FROM staged_rejection_samples WHERE dataset_id=? AND dataset_version=? AND file_sha256=?",
         key,
     )
     connection.execute(
@@ -515,6 +552,7 @@ def process_file(
     connection.commit()
 
     rows_seen = rows_accepted = rows_rejected = source_row = 0
+    sample_counts: Counter[str] = Counter()
     try:
         category: str | None = None
         columns: dict[str, str] | None = None
@@ -524,15 +562,31 @@ def process_file(
                 category = classify_category(path.name, columns)
             assert category is not None
             accepted: list[tuple[Any, ...]] = []
-            rejected: list[tuple[Any, ...]] = []
+            rejection_counts: Counter[tuple[str, str]] = Counter()
+            rejection_samples: list[tuple[Any, ...]] = []
             for raw in batch:
                 source_row += 1
                 rows_seen += 1
                 record, reason = _canonical_record(raw, columns, category, path.name)
                 if reason:
-                    rejected.append(
-                        (*key, source_row, reason, json.dumps(raw, default=str, ensure_ascii=True))
+                    detail = _rejection_detail(raw, columns, reason)
+                    rejection_counts[(reason, detail)] += 1
+                    sample_limit = (
+                        RANK_REJECTION_SAMPLE_LIMIT
+                        if reason.startswith("position_out_of_range:")
+                        else REJECTION_SAMPLE_LIMIT
                     )
+                    if sample_counts[reason] < sample_limit:
+                        rejection_samples.append(
+                            (
+                                *key,
+                                source_row,
+                                reason,
+                                detail,
+                                json.dumps(raw, default=str, ensure_ascii=True),
+                            )
+                        )
+                        sample_counts[reason] += 1
                     rows_rejected += 1
                 else:
                     assert record is not None
@@ -573,11 +627,26 @@ def process_file(
             )
             connection.executemany(
                 """
-                INSERT INTO staged_rejections (
-                    dataset_id, dataset_version, file_sha256, source_row, reason, raw_json
+                INSERT INTO staged_rejection_counts (
+                    dataset_id, dataset_version, file_sha256, reason, detail, rejected_count
                 ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(dataset_id, dataset_version, file_sha256, reason, detail)
+                DO UPDATE SET rejected_count=staged_rejection_counts.rejected_count
+                    + excluded.rejected_count
                 """,
-                rejected,
+                [
+                    (*key, reason, detail, count)
+                    for (reason, detail), count in rejection_counts.items()
+                ],
+            )
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO staged_rejection_samples (
+                    dataset_id, dataset_version, file_sha256, source_row,
+                    reason, detail, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                rejection_samples,
             )
             connection.execute(
                 """
@@ -587,6 +656,15 @@ def process_file(
                 (rows_seen, rows_accepted, rows_rejected, *key),
             )
             connection.commit()
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "processing",
+                        "rows_seen": rows_seen,
+                        "rows_accepted": rows_accepted,
+                        "rows_rejected": rows_rejected,
+                    }
+                )
 
         if columns is None:
             raise ValueError("No table rows or headers were found.")
@@ -604,6 +682,15 @@ def process_file(
             (spec.dataset_id, spec.version),
         )
         connection.commit()
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "stage": "complete",
+                    "rows_seen": rows_seen,
+                    "rows_accepted": rows_accepted,
+                    "rows_rejected": rows_rejected,
+                }
+            )
     except Exception as exc:
         connection.rollback()
         connection.execute(
@@ -622,6 +709,299 @@ def process_file(
         "rows_accepted": rows_accepted,
         "rows_rejected": rows_rejected,
     }
+
+
+def _rejection_detail(
+    row: Mapping[str, Any],
+    columns: Mapping[str, str],
+    reason: str,
+) -> str:
+    if reason == "non_us_or_unknown_region":
+        raw_value = _clean_text(_value(row, columns, "country"))
+        return "missing" if raw_value is None else re.sub(r"\s+", " ", raw_value)[:100]
+    if reason.startswith("position_out_of_range:"):
+        chart = _clean_text(_value(row, columns, "chart")) or "unknown"
+        rank = _clean_text(_value(row, columns, "position")) or "missing"
+        return f"{chart[:60]}:rank={rank[:20]}"
+    return ""
+
+
+def supplement_rank_rejection_samples(
+    source_database: Path,
+    source_file: Path,
+    compact_database: Path,
+    spec: DatasetSpec,
+) -> int:
+    digest = sha256_file(source_file)
+    source_connection = sqlite3.connect(
+        f"{source_database.resolve().as_uri()}?mode=ro", uri=True
+    )
+    compact_connection = sqlite3.connect(compact_database)
+    try:
+        source_file_row = source_connection.execute(
+            """
+            SELECT rows_rejected FROM staged_files
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=? AND status='complete'
+            """,
+            (spec.dataset_id, spec.version, digest),
+        ).fetchone()
+        compact_file_row = compact_connection.execute(
+            """
+            SELECT 1 FROM staged_files
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=? AND status='complete'
+            """,
+            (spec.dataset_id, spec.version, digest),
+        ).fetchone()
+        if source_file_row is None or compact_file_row is None:
+            raise ValueError("Both databases must contain the same completed source checksum.")
+        source_tables = {
+            row[0]
+            for row in source_connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if "staged_rejections" not in source_tables:
+            return 0
+        headers, _ = _schema_for(source_file)
+        columns = detect_columns(headers)
+        rows = source_connection.execute(
+            """
+            SELECT source_row, reason, raw_json
+            FROM staged_rejections
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+              AND reason LIKE 'position_out_of_range:%'
+            ORDER BY source_row LIMIT ?
+            """,
+            (
+                spec.dataset_id,
+                spec.version,
+                digest,
+                RANK_REJECTION_SAMPLE_LIMIT,
+            ),
+        ).fetchall()
+        samples = []
+        for source_row, reason, raw_json in rows:
+            raw = json.loads(raw_json)
+            detail = _rejection_detail(raw, columns, reason)
+            samples.append(
+                (
+                    spec.dataset_id,
+                    spec.version,
+                    digest,
+                    source_row,
+                    reason,
+                    detail,
+                    raw_json,
+                )
+            )
+        before = compact_connection.total_changes
+        compact_connection.executemany(
+            """
+            INSERT OR IGNORE INTO staged_rejection_samples (
+                dataset_id, dataset_version, file_sha256, source_row,
+                reason, detail, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            samples,
+        )
+        compact_connection.commit()
+        added = compact_connection.total_changes - before
+        integrity = compact_connection.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise sqlite3.DatabaseError(f"Compact staging integrity check failed: {integrity}")
+        return added
+    finally:
+        source_connection.close()
+        compact_connection.close()
+
+
+def build_compact_staging_database(
+    source_database: Path,
+    source_file: Path,
+    target_database: Path,
+    spec: DatasetSpec,
+    *,
+    chunk_size: int = 50_000,
+    minimum_free_bytes: int | None = None,
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than zero")
+    source_database = source_database.resolve()
+    source_file = source_file.resolve()
+    target_database = target_database.resolve()
+    target_database.parent.mkdir(parents=True, exist_ok=True)
+    temporary_database = target_database.with_name(target_database.name + ".building")
+    if target_database.exists():
+        raise FileExistsError(f"Refusing to overwrite existing compact database: {target_database}")
+    if temporary_database.exists():
+        raise FileExistsError(
+            f"Refusing to overwrite an existing build file: {temporary_database}"
+        )
+    if not source_database.is_file() or not source_file.is_file():
+        raise FileNotFoundError("The source database and source data file must both exist.")
+
+    digest = sha256_file(source_file)
+    source_connection = sqlite3.connect(f"{source_database.as_uri()}?mode=ro", uri=True)
+    target_connection: sqlite3.Connection | None = None
+    try:
+        source_file_row = source_connection.execute(
+            """
+            SELECT status, rows_seen, rows_accepted, rows_rejected
+            FROM staged_files
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+            """,
+            (spec.dataset_id, spec.version, digest),
+        ).fetchone()
+        if source_file_row is None:
+            raise ValueError("The source database has no matching file checksum and dataset version.")
+        status, rows_seen, rows_accepted, rows_rejected = source_file_row
+        if status != "complete":
+            raise ValueError(f"Source staging status must be complete, not {status!r}.")
+
+        accepted_raw_bytes = source_connection.execute(
+            """
+            SELECT COALESCE(SUM(length(raw_json)), 0)
+            FROM staged_observations
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+            """,
+            (spec.dataset_id, spec.version, digest),
+        ).fetchone()[0]
+        required_free_bytes = max(
+            int(minimum_free_bytes or 0),
+            int(accepted_raw_bytes) + int(rows_accepted) * 2048 + 512 * 1024 * 1024,
+        )
+        free_bytes = disk_usage(target_database.parent).free
+        if free_bytes < required_free_bytes:
+            raise OSError(
+                f"Insufficient free space for safe compaction: {free_bytes} bytes available, "
+                f"{required_free_bytes} bytes required by the conservative estimate."
+            )
+
+        target_connection = sqlite3.connect(temporary_database)
+        _initialize_staging(target_connection)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "stage": "preflight_complete",
+                    "free_bytes": free_bytes,
+                    "required_free_bytes": required_free_bytes,
+                    "rows_expected": rows_seen,
+                }
+            )
+        result = process_file(
+            target_connection,
+            spec,
+            source_file,
+            chunk_size=chunk_size,
+            file_sha256=digest,
+            progress_callback=progress_callback,
+        )
+        if result["status"] != "complete":
+            raise RuntimeError(f"Compact staging did not complete: {result['status']}")
+        rank_samples_added = supplement_rank_rejection_samples(
+            source_database,
+            source_file,
+            temporary_database,
+            spec,
+        )
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "stage": "rank_samples_supplemented",
+                    "added_samples": rank_samples_added,
+                }
+            )
+
+        compact_counts = target_connection.execute(
+            """
+            SELECT rows_seen, rows_accepted, rows_rejected
+            FROM staged_files
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+            """,
+            (spec.dataset_id, spec.version, digest),
+        ).fetchone()
+        rejection_count = target_connection.execute(
+            """
+            SELECT COALESCE(SUM(rejected_count), 0)
+            FROM staged_rejection_counts
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+            """,
+            (spec.dataset_id, spec.version, digest),
+        ).fetchone()[0]
+        observations_count = target_connection.execute(
+            """
+            SELECT COUNT(*) FROM staged_observations
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+            """,
+            (spec.dataset_id, spec.version, digest),
+        ).fetchone()[0]
+        if compact_counts != (rows_seen, rows_accepted, rows_rejected):
+            raise ValueError(
+                f"Row reconciliation failed: source={(rows_seen, rows_accepted, rows_rejected)}, "
+                f"compact={compact_counts}"
+            )
+        if rejection_count != rows_rejected or observations_count != rows_accepted:
+            raise ValueError(
+                "Compact accepted/rejected table counts do not reconcile with the source manifest."
+            )
+
+        rights = source_connection.execute(
+            """
+            SELECT rights_status, evidence_path, reviewed_by, reviewed_at, notes
+            FROM source_rights WHERE dataset_id=? AND dataset_version=?
+            """,
+            (spec.dataset_id, spec.version),
+        ).fetchone()
+        if rights is not None:
+            target_connection.execute(
+                """
+                UPDATE source_rights
+                SET rights_status=?, evidence_path=?, reviewed_by=?, reviewed_at=?, notes=?
+                WHERE dataset_id=? AND dataset_version=?
+                """,
+                (*rights, spec.dataset_id, spec.version),
+            )
+            target_connection.commit()
+
+        integrity = target_connection.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise sqlite3.DatabaseError(f"Compact staging integrity check failed: {integrity}")
+        if sha256_file(source_file) != digest:
+            raise ValueError("The source data file changed during compact staging.")
+        rejection_samples = target_connection.execute(
+            """
+            SELECT COUNT(*) FROM staged_rejection_samples
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+            """,
+            (spec.dataset_id, spec.version, digest),
+        ).fetchone()[0]
+        target_connection.close()
+        target_connection = None
+        if target_database.exists():
+            raise FileExistsError(
+                f"Target appeared during compaction; refusing to overwrite: {target_database}"
+            )
+        temporary_database.rename(target_database)
+        return {
+            "status": "complete",
+            "source_database": str(source_database),
+            "source_file": str(source_file),
+            "source_sha256": digest,
+            "target_database": str(target_database),
+            "rows_seen": rows_seen,
+            "rows_accepted": rows_accepted,
+            "rows_rejected": rows_rejected,
+            "rejection_samples": rejection_samples,
+            "rank_rejection_samples_added": rank_samples_added,
+            "estimated_required_free_bytes": required_free_bytes,
+            "free_bytes_at_preflight": free_bytes,
+            "integrity_check": integrity,
+        }
+    finally:
+        if target_connection is not None:
+            target_connection.close()
+        source_connection.close()
 
 
 def approve_source_rights(connection: sqlite3.Connection, approval_path: Path) -> None:
@@ -1245,13 +1625,19 @@ def write_analysis_reports(connection: sqlite3.Connection, report_dir: Path) -> 
                 )
             stream.write("\n")
         stream.write("Every source remains `UNVERIFIED` for commercial analytics and redistribution. Missing dates are not treated as zero streams. Completeness is not asserted without a verified expected chart calendar.\n")
+    aggregated_rejections = connection.execute(
+        "SELECT COALESCE(SUM(rejected_count), 0) FROM staged_rejection_counts"
+    ).fetchone()[0]
+    legacy_rejections = connection.execute(
+        "SELECT COUNT(*) FROM staged_rejections"
+    ).fetchone()[0]
     validation = {
         "generated_at": datetime.now().astimezone().isoformat(),
         "staged_observations": connection.execute(
             f"SELECT COUNT(*) {source_join}"
         ).fetchone()[0],
         "staged_files": connection.execute("SELECT COUNT(*) FROM staged_files WHERE status='complete'").fetchone()[0],
-        "staged_rejections": connection.execute("SELECT COUNT(*) FROM staged_rejections").fetchone()[0],
+        "staged_rejections": aggregated_rejections or legacy_rejections,
         "permissions_approved": connection.execute(
             "SELECT COUNT(*) FROM source_rights WHERE rights_status='APPROVED'"
         ).fetchone()[0],
@@ -1363,3 +1749,366 @@ def production_import_records(
     except Exception:
         app_connection.rollback()
         raise
+
+
+def write_chart_quality_reports(
+    connection: sqlite3.Connection,
+    report_dir: Path,
+    dataset_id: str,
+    dataset_version: int,
+    *,
+    start_year: int = 2017,
+    end_year: int = 2026,
+) -> dict[str, Any]:
+    if start_year > end_year:
+        raise ValueError("start_year must not exceed end_year")
+    report_dir.mkdir(parents=True, exist_ok=True)
+    source = connection.execute(
+        """
+        SELECT file_sha256, rows_seen, rows_accepted, rows_rejected, status
+        FROM staged_files
+        WHERE dataset_id=? AND dataset_version=?
+        ORDER BY completed_at DESC LIMIT 1
+        """,
+        (dataset_id, dataset_version),
+    ).fetchone()
+    if source is None or source[4] != "complete":
+        raise ValueError("Quality reports require a completed staged dataset file.")
+    file_sha256, rows_seen, rows_accepted, rows_rejected, _ = source
+    base_where = """
+        FROM staged_observations o
+        JOIN staged_files f USING (dataset_id, dataset_version, file_sha256)
+        WHERE f.status='complete' AND o.dataset_id=? AND o.dataset_version=?
+          AND o.file_sha256=? AND o.category='songs' AND o.cadence='daily'
+    """
+    observations_by_date: dict[str, dict[str, Any]] = {}
+    for row in connection.execute(
+        f"""
+        SELECT chart_name, chart_date, COUNT(*) AS row_count,
+               SUM(CASE WHEN streams IS NOT NULL THEN 1 ELSE 0 END) AS stream_rows,
+               SUM(CASE WHEN streams=0 THEN 1 ELSE 0 END) AS zero_stream_rows
+        {base_where}
+        GROUP BY chart_name, chart_date
+        ORDER BY chart_name, chart_date
+        """,
+        (dataset_id, dataset_version, file_sha256),
+    ):
+        chart_name, chart_date, row_count, stream_rows, zero_stream_rows = row
+        key = str(chart_name or "unknown")
+        record = observations_by_date.setdefault(
+            key,
+            {
+                "dates": {},
+                "first_date": str(chart_date),
+                "last_date": str(chart_date),
+            },
+        )
+        record["dates"][str(chart_date)] = {
+            "row_count": int(row_count),
+            "stream_rows": int(stream_rows or 0),
+            "zero_stream_rows": int(zero_stream_rows or 0),
+        }
+        record["first_date"] = min(record["first_date"], str(chart_date))
+        record["last_date"] = max(record["last_date"], str(chart_date))
+
+    chart_names = sorted(set(observations_by_date) | {"top200", "viral50"})
+    expected_sizes = {"top200": 200, "viral50": 50}
+    year_track_counts = {
+        (str(chart_name or "unknown"), str(year)): int(track_count)
+        for chart_name, year, track_count in connection.execute(
+            f"""
+            SELECT o.chart_name, substr(o.chart_date, 1, 4),
+                   COUNT(DISTINCT NULLIF(o.track_id, ''))
+            {base_where}
+            GROUP BY o.chart_name, substr(o.chart_date, 1, 4)
+            """,
+            (dataset_id, dataset_version, file_sha256),
+        )
+    }
+    duplicate_stats = {
+        (str(chart_name or "unknown"), str(year)): {
+            "duplicate_groups": int(groups),
+            "duplicate_extra_rows": int(extra_rows),
+            "conflicting_groups": int(conflicts),
+        }
+        for chart_name, year, groups, extra_rows, conflicts in connection.execute(
+            f"""
+            SELECT chart_name, year, COUNT(*), SUM(row_count - 1),
+                   SUM(CASE WHEN stream_variants > 1 THEN 1 ELSE 0 END)
+            FROM (
+                SELECT o.chart_name, substr(o.chart_date, 1, 4) AS year,
+                       o.chart_date, o.track_id, o.position, COUNT(*) AS row_count,
+                       COUNT(DISTINCT COALESCE(CAST(o.streams AS TEXT), 'NULL'))
+                           AS stream_variants
+                {base_where} AND o.track_id IS NOT NULL
+                GROUP BY o.chart_name, substr(o.chart_date, 1, 4),
+                         o.chart_date, o.track_id, o.position
+                HAVING COUNT(*) > 1
+            )
+            GROUP BY chart_name, year
+            """,
+            (dataset_id, dataset_version, file_sha256),
+        )
+    }
+
+    daily_fields = (
+        "chart_name", "chart_date", "observed_rows", "expected_rank_count",
+        "valid_stream_rows", "zero_stream_rows", "status", "calendar_assumption",
+    )
+    year_fields = (
+        "chart_name", "year", "calendar_days", "observed_dates",
+        "calendar_missing_dates", "observations", "valid_stream_observations",
+        "missing_stream_observations", "zero_stream_observations",
+        "incomplete_observed_dates", "expected_rank_count",
+        "duplicate_identity_groups", "duplicate_extra_rows",
+        "conflicting_stream_identity_groups", "unique_track_ids",
+        "first_observed_date", "last_observed_date", "calendar_assumption",
+    )
+    month_fields = (
+        "chart_name", "month", "calendar_days", "observed_dates",
+        "calendar_missing_dates", "observations", "valid_stream_observations",
+        "incomplete_observed_dates", "expected_rank_count", "calendar_assumption",
+    )
+    daily_records: list[dict[str, Any]] = []
+    year_records: list[dict[str, Any]] = []
+    month_totals: dict[tuple[str, str], dict[str, int]] = {}
+    first_dates: dict[str, date] = {}
+    last_dates: dict[str, date] = {}
+    for chart_name in chart_names:
+        observed = observations_by_date.get(chart_name, {"dates": {}})
+        dates = observed["dates"]
+        actual_dates = [date.fromisoformat(value) for value in dates]
+        if actual_dates:
+            first_dates[chart_name] = min(actual_dates)
+            last_dates[chart_name] = max(actual_dates)
+        expected = expected_sizes.get(chart_name)
+        for year in range(start_year, end_year + 1):
+            year_dates = [
+                (date(year, 1, 1).toordinal() + offset)
+                for offset in range((date(year + 1, 1, 1) - date(year, 1, 1)).days)
+            ]
+            year_days = [date.fromordinal(value) for value in year_dates]
+            observed_year = {
+                day.isoformat(): dates[day.isoformat()]
+                for day in year_days
+                if day.isoformat() in dates
+            }
+            incomplete = sum(
+                1
+                for item in observed_year.values()
+                if expected is not None and item["row_count"] != expected
+            )
+            year_observations = sum(item["row_count"] for item in observed_year.values())
+            year_streams = sum(item["stream_rows"] for item in observed_year.values())
+            year_zeros = sum(item["zero_stream_rows"] for item in observed_year.values())
+            span_start = first_dates.get(chart_name)
+            span_end = last_dates.get(chart_name)
+            year_record = {
+                "chart_name": chart_name,
+                "year": year,
+                "calendar_days": len(year_days),
+                "observed_dates": len(observed_year),
+                "calendar_missing_dates": len(year_days) - len(observed_year),
+                "observations": year_observations,
+                "valid_stream_observations": year_streams,
+                "missing_stream_observations": year_observations - year_streams,
+                "zero_stream_observations": year_zeros,
+                "incomplete_observed_dates": incomplete,
+                "expected_rank_count": expected or "",
+                "duplicate_identity_groups": duplicate_stats.get(
+                    (chart_name, str(year)), {}
+                ).get("duplicate_groups", 0),
+                "duplicate_extra_rows": duplicate_stats.get(
+                    (chart_name, str(year)), {}
+                ).get("duplicate_extra_rows", 0),
+                "conflicting_stream_identity_groups": duplicate_stats.get(
+                    (chart_name, str(year)), {}
+                ).get("conflicting_groups", 0),
+                "unique_track_ids": year_track_counts.get((chart_name, str(year)), 0),
+                "first_observed_date": min(observed_year) if observed_year else "",
+                "last_observed_date": max(observed_year) if observed_year else "",
+                "calendar_assumption": (
+                    "Calendar-day comparison only; expected publication schedule is unverified."
+                ),
+            }
+            year_records.append(year_record)
+            for month in range(1, 13):
+                month_key = f"{year:04d}-{month:02d}"
+                start = date(year, month, 1)
+                end = date(year + (1 if month == 12 else 0), month % 12 + 1, 1)
+                month_days = (end - start).days
+                totals = month_totals.setdefault(
+                    (chart_name, month_key),
+                    {
+                        "calendar_days": month_days,
+                        "observed_dates": 0,
+                        "observations": 0,
+                        "valid_stream_observations": 0,
+                        "incomplete_observed_dates": 0,
+                    },
+                )
+                for day in year_days:
+                    if day.month != month or day.isoformat() not in dates:
+                        continue
+                    item = dates[day.isoformat()]
+                    totals["observed_dates"] += 1
+                    totals["observations"] += item["row_count"]
+                    totals["valid_stream_observations"] += item["stream_rows"]
+                    if expected is not None and item["row_count"] != expected:
+                        totals["incomplete_observed_dates"] += 1
+
+                for day in year_days:
+                    if day.month != month:
+                        continue
+                    item = dates.get(day.isoformat())
+                    is_inside_span = (
+                        span_start is not None
+                        and span_end is not None
+                        and span_start <= day <= span_end
+                    )
+                    if item is None and is_inside_span:
+                        status = "GAP_CANDIDATE_WITHIN_OBSERVED_SPAN"
+                    elif item is None:
+                        status = "NO_OBSERVATION_OUTSIDE_OBSERVED_SPAN"
+                    elif expected is not None and item["row_count"] != expected:
+                        status = "OBSERVED_INCOMPLETE_RANK_COUNT"
+                    else:
+                        status = "OBSERVED"
+                    daily_records.append(
+                        {
+                            "chart_name": chart_name,
+                            "chart_date": day.isoformat(),
+                            "observed_rows": 0 if item is None else item["row_count"],
+                            "expected_rank_count": expected or "",
+                            "valid_stream_rows": 0 if item is None else item["stream_rows"],
+                            "zero_stream_rows": 0 if item is None else item["zero_stream_rows"],
+                            "status": status,
+                            "calendar_assumption": (
+                                "Daily calendar candidate only; source reporting schedule is unverified."
+                            ),
+                        }
+                    )
+    month_records = [
+        {
+            "chart_name": chart_name,
+            "month": month,
+            "calendar_days": totals["calendar_days"],
+            "observed_dates": totals["observed_dates"],
+            "calendar_missing_dates": totals["calendar_days"] - totals["observed_dates"],
+            "observations": totals["observations"],
+            "valid_stream_observations": totals["valid_stream_observations"],
+            "incomplete_observed_dates": totals["incomplete_observed_dates"],
+            "expected_rank_count": expected_sizes.get(chart_name, ""),
+            "calendar_assumption": (
+                "Calendar-day comparison only; expected publication schedule is unverified."
+            ),
+        }
+        for (chart_name, month), totals in sorted(month_totals.items())
+    ]
+
+    def write_csv_file(
+        name: str,
+        fields: Sequence[str],
+        records: Iterable[Mapping[str, Any]],
+    ) -> None:
+        with (report_dir / name).open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(records)
+
+    write_csv_file("chart_quality_by_date.csv", daily_fields, daily_records)
+    write_csv_file("chart_quality_by_year.csv", year_fields, year_records)
+    write_csv_file("chart_quality_by_month.csv", month_fields, month_records)
+
+    rejection_records = [
+        {
+            "reason": reason,
+            "detail": detail,
+            "rejected_rows": count,
+        }
+        for reason, detail, count in connection.execute(
+            """
+            SELECT reason, detail, SUM(rejected_count)
+            FROM staged_rejection_counts
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+            GROUP BY reason, detail ORDER BY reason, detail
+            """,
+            (dataset_id, dataset_version, file_sha256),
+        )
+    ]
+    write_csv_file(
+        "rejection_summary.csv",
+        ("reason", "detail", "rejected_rows"),
+        rejection_records,
+    )
+    sample_records = [
+        {
+            "source_row": source_row,
+            "reason": reason,
+            "detail": detail,
+            "raw_json": raw_json,
+        }
+        for source_row, reason, detail, raw_json in connection.execute(
+            """
+            SELECT source_row, reason, detail, raw_json
+            FROM staged_rejection_samples
+            WHERE dataset_id=? AND dataset_version=? AND file_sha256=?
+              AND reason LIKE 'position_out_of_range:%'
+            ORDER BY source_row
+            """,
+            (dataset_id, dataset_version, file_sha256),
+        )
+    ]
+    write_csv_file(
+        "invalid_rank_samples.csv",
+        ("source_row", "reason", "detail", "raw_json"),
+        sample_records,
+    )
+
+    rejection_total = sum(int(row["rejected_rows"]) for row in rejection_records)
+    summary = {
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "dataset_id": dataset_id,
+        "dataset_version": dataset_version,
+        "file_sha256": file_sha256,
+        "source_rows_seen": rows_seen,
+        "accepted_rows": rows_accepted,
+        "rejected_rows": rows_rejected,
+        "rejection_aggregates_reconcile": rejection_total == rows_rejected,
+        "accepted_daily_song_observations": sum(
+            int(row["observations"]) for row in year_records
+        ),
+        "chart_summaries": {
+            chart_name: {
+                "first_observed_date": (
+                    first_dates[chart_name].isoformat()
+                    if chart_name in first_dates
+                    else None
+                ),
+                "last_observed_date": (
+                    last_dates[chart_name].isoformat()
+                    if chart_name in last_dates
+                    else None
+                ),
+                "years": [
+                    row for row in year_records if row["chart_name"] == chart_name
+                ],
+            }
+            for chart_name in chart_names
+        },
+        "invalid_rank_sample_count": len(sample_records),
+        "invalid_rank_sample_limit_per_reason": RANK_REJECTION_SAMPLE_LIMIT,
+        "general_rejection_sample_limit_per_reason": REJECTION_SAMPLE_LIMIT,
+        "calendar_coverage_note": (
+            "Calendar dates without rows are candidate gaps only. No expected source "
+            "publication schedule was verified; missing rows are not zero streams."
+        ),
+        "permissions_note": (
+            "Research staging only. The Kaggle listing license does not by itself "
+            "resolve underlying Spotify rights or commercial-use permission."
+        ),
+    }
+    (report_dir / "chart_quality_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8"
+    )
+    return summary

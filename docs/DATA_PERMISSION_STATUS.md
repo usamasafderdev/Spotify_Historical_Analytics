@@ -6,12 +6,15 @@
 |---|---|---|
 | `gonzalopezgil/spotify-charts-daily-updated` v146 | CC BY-SA 4.0 on Kaggle | UNVERIFIED |
 | `dhruvildave/spotify-charts` v85 | ODbL 1.0 database / original-author contents on Kaggle | UNVERIFIED |
+| Zenodo MGD+ record 8086643 | CC BY 4.0 stated on Zenodo record | UNVERIFIED for upstream Spotify content and intended commercial analytics |
 
 A dataset platform's stated license does not by itself prove upstream ownership or resolve rights in Spotify Content, database contents, derived analytics, or an intended commercial product. The status defaults to `UNVERIFIED` for each dataset version. No automatic approval is granted from a Kaggle page, metadata field, source attribution, user upload, or download success.
 
 ## Phase 6 local research audit
 
 The pinned request for `gonzalopezgil/spotify-charts-daily-updated` v146 returned HTTP 404. `dhruvildave/spotify-charts` v85 was downloaded and audited in the separate research root; 455,031 US candidate rows were staged from a 26,173,514-row CSV. This is a technical schema/market validation only. It is not an upstream provenance check or license approval. `permissions_approved` remains 0 and `production_imports_performed` remains 0.
+
+The current Kaggle listing was separately checked and reported v146. No version 146 cache was found. The unversioned KaggleHub download was not called because the conservative free-space requirement (47,033,771,609 bytes) exceeded the 31,576,604,672 bytes available at preflight. Zenodo MGD+ was downloaded (364,603,433 bytes) and CRC-checked, but its archive was not extracted or production-imported. Record-level CC BY 4.0 metadata does not establish rights to underlying Spotify content, commercial derived analytics, or redistribution. No data rights status was changed or approved.
 
 ## Approval gate
 

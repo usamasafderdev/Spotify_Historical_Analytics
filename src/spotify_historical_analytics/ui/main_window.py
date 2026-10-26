@@ -490,6 +490,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
+
+        self.overview_data = QWidget()
+        data_layout = QVBoxLayout(self.overview_data)
+        data_layout.setContentsMargins(0, 0, 0, 0)
+        data_layout.setSpacing(14)
+
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(12)
         definitions = [
@@ -502,7 +508,7 @@ class MainWindow(QMainWindow):
         self.kpis = [KPIWidget(title, detail) for title, detail in definitions]
         for widget in self.kpis:
             kpi_row.addWidget(widget, 1)
-        layout.addLayout(kpi_row)
+        data_layout.addLayout(kpi_row)
 
         charts = QGridLayout()
         charts.setSpacing(12)
@@ -512,13 +518,39 @@ class MainWindow(QMainWindow):
         charts.addWidget(self.top_songs_chart, 0, 1)
         charts.setColumnStretch(0, 3)
         charts.setColumnStretch(1, 2)
-        layout.addLayout(charts, 1)
+        data_layout.addLayout(charts, 1)
+        layout.addWidget(self.overview_data, 1)
 
-        self.overview_empty = QLabel("No real imported observations yet. Import a CSV/XLSX file to populate analytics.")
+        self.overview_empty = QLabel("No historical chart data is loaded yet.")
         self.overview_empty.setObjectName("emptyState")
         self.overview_empty.setAlignment(Qt.AlignCenter)
+        self.overview_empty.setWordWrap(True)
         layout.addWidget(self.overview_empty)
+
+        self.overview_empty_actions = QWidget()
+        actions_layout = QHBoxLayout(self.overview_empty_actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(10)
+        actions_layout.addStretch()
+        import_authorized_button = QPushButton("Import Authorized Dataset")
+        import_authorized_button.setObjectName("primary")
+        import_authorized_button.clicked.connect(self.import_file)
+        self.empty_import_button = import_authorized_button
+        actions_layout.addWidget(import_authorized_button)
+        preview_demo_button = QPushButton("Preview Demo Dashboard")
+        preview_demo_button.clicked.connect(self.load_demo_data)
+        self.empty_demo_button = preview_demo_button
+        actions_layout.addWidget(preview_demo_button)
+        view_sources_button = QPushButton("View Data Sources")
+        view_sources_button.clicked.connect(lambda: self.navigate(4))
+        self.empty_sources_button = view_sources_button
+        actions_layout.addWidget(view_sources_button)
+        actions_layout.addStretch()
+        layout.addWidget(self.overview_empty_actions)
+
+        self.overview_data.setVisible(False)
         self.overview_empty.setVisible(True)
+        self.overview_empty_actions.setVisible(True)
         return page
 
     def _build_songs_page(self) -> QWidget:
@@ -994,7 +1026,10 @@ class MainWindow(QMainWindow):
                 "DEMO / SYNTHETIC observations exist in the isolated demo fixture and are excluded from real-data metrics."
             )
             self.demo_banner.setVisible(demo_rows > 0)
-        self.overview_empty.setVisible(real_rows == 0 and not self._demo_mode)
+        has_active_data = demo_rows > 0 if self._demo_mode else real_rows > 0
+        self.overview_data.setVisible(has_active_data)
+        self.overview_empty.setVisible(not has_active_data)
+        self.overview_empty_actions.setVisible(not has_active_data)
         self._render_streams_chart(payload["streams"])
         self._render_top_songs_chart(overview["top_tracks"])
         self.refresh_songs_table(payload["songs"])

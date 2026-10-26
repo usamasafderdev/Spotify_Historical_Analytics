@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import os
 import sqlite3
 import time
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -18,19 +20,24 @@ from scripts.download_historical_datasets import (
     _active_archive_paths,
     _existing_cache,
     download_dataset,
+    download_dataset_latest,
 )
+from scripts.audit_mgdplus_archive import audit_archive
 from scripts import download_historical_datasets as downloader
 from spotify_historical_analytics.db import DatabaseManager
 from spotify_historical_analytics.research_pipeline import (
     DATASETS,
     _initialize_staging,
     approve_source_rights,
+    build_compact_staging_database,
     classify_category,
     detect_columns,
     inventory_file,
     normalize_region,
     process_file,
     production_import_records,
+    supplement_rank_rejection_samples,
+    write_chart_quality_reports,
     write_analysis_reports,
 )
 
@@ -124,16 +131,24 @@ def test_csv_chunk_processing_filters_non_us_rejects_bad_fields_and_is_idempoten
     assert staging_db.execute("SELECT streams FROM staged_observations").fetchone()[0] == 0
     reasons = {
         row[0]
-        for row in staging_db.execute("SELECT reason FROM staged_rejections").fetchall()
+        for row in staging_db.execute(
+            "SELECT DISTINCT reason FROM staged_rejection_counts"
+        ).fetchall()
     }
     assert "non_us_or_unknown_region" in reasons
     assert "invalid_or_missing_chart_date" in reasons
     assert "invalid_stream_count:not_numeric" in reasons
+    assert staging_db.execute("SELECT COUNT(*) FROM staged_rejections").fetchone()[0] == 0
+    assert staging_db.execute(
+        "SELECT SUM(rejected_count) FROM staged_rejection_counts"
+    ).fetchone()[0] == 4
 
     again = process_file(staging_db, DATASETS[0], file_path, chunk_size=1)
     assert again["status"] == "reused"
     assert staging_db.execute("SELECT COUNT(*) FROM staged_observations").fetchone()[0] == 1
-    assert staging_db.execute("SELECT COUNT(*) FROM staged_rejections").fetchone()[0] == 4
+    assert staging_db.execute(
+        "SELECT SUM(rejected_count) FROM staged_rejection_counts"
+    ).fetchone()[0] == 4
 
 
 def test_track_ids_are_extracted_only_from_verified_spotify_track_urls(
@@ -164,6 +179,12 @@ def test_track_ids_are_extracted_only_from_verified_spotify_track_urls(
     staging_db.commit()
 
     result = process_file(staging_db, DATASETS[0], source)
+    assert result["status"] == "reprocess_required"
+    assert staging_db.execute(
+        "SELECT track_id FROM staged_observations WHERE position=1"
+    ).fetchone()[0] is None
+
+    result = process_file(staging_db, DATASETS[0], source, force_reprocess=True)
 
     assert result["status"] == "complete"
     assert staging_db.execute(
@@ -193,6 +214,87 @@ def test_downloader_reuses_pinned_local_cache_without_network(tmp_path: Path) ->
     assert result["status"] == "REUSED"
     assert Path(result["path"]) == cached
     assert list((tmp_path / ".locks").glob("*.lock")) == []
+
+
+def test_latest_downloader_reuses_exact_listing_version_cache(tmp_path: Path) -> None:
+    spec = DATASETS[0]
+    cached = (
+        tmp_path
+        / spec.research_folder
+        / "datasets"
+        / spec.owner
+        / spec.slug
+        / "versions"
+        / "146"
+    )
+    cached.mkdir(parents=True)
+    (cached / "source.csv").write_text("date,region\n", encoding="utf-8")
+
+    result = download_dataset_latest(
+        spec,
+        tmp_path,
+        latest_version=146,
+        listed_size_bytes=15_000_000_000,
+    )
+
+    assert result["status"] == "REUSED_LATEST_CACHE"
+    assert result["version"] == 146
+    assert result["unversioned_request"] == "not_called"
+
+
+def test_latest_downloader_skips_unversioned_call_when_space_preflight_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(downloader, "disk_usage", lambda _: SimpleNamespace(free=100))
+    result = download_dataset_latest(
+        DATASETS[0],
+        tmp_path,
+        latest_version=146,
+        listed_size_bytes=100,
+        expansion_factor=3,
+        reserve_bytes=1_000,
+    )
+
+    assert result["status"] == "SKIPPED_INSUFFICIENT_SPACE"
+    assert result["required_free_bytes"] == 1_300
+    assert result["free_bytes"] == 100
+    assert result["unversioned_request"] == "not_called"
+
+
+def test_latest_downloader_uses_unversioned_handle_after_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    import kagglehub
+
+    spec = DATASETS[0]
+    returned = tmp_path / "fake-kagglehub-result" / "versions" / "146"
+    returned.mkdir(parents=True)
+    (returned / "charts.csv").write_text("date,region\n", encoding="utf-8")
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_download(*args: object, **kwargs: object) -> str:
+        calls.append((args, kwargs))
+        return str(returned)
+
+    monkeypatch.setattr(downloader.importlib.metadata, "version", lambda _: "1.0.3")
+    monkeypatch.setattr(downloader, "disk_usage", lambda _: SimpleNamespace(free=10**12))
+    monkeypatch.setattr(kagglehub, "dataset_download", fake_download)
+
+    result = download_dataset_latest(
+        spec,
+        tmp_path,
+        latest_version=146,
+        listed_size_bytes=100,
+        reserve_bytes=0,
+    )
+
+    assert result["status"] == "DOWNLOADED_OR_CACHE_REUSED"
+    assert result["unversioned_request"] == "attempted"
+    assert calls == [((spec.dataset_id,), {"force_download": False})]
 
 
 def test_downloader_detects_kagglehub_archive_path_and_avoids_partial_cache(
@@ -299,8 +401,325 @@ def test_missing_region_is_not_assumed_to_be_us(tmp_path: Path, staging_db: sqli
     result = process_file(staging_db, DATASETS[0], file_path)
     assert result["rows_accepted"] == 0
     assert staging_db.execute(
-        "SELECT reason FROM staged_rejections"
+        "SELECT reason FROM staged_rejection_counts"
     ).fetchone()[0] == "non_us_or_unknown_region"
+    assert staging_db.execute(
+        "SELECT detail FROM staged_rejection_counts"
+    ).fetchone()[0] == "missing"
+
+
+def test_rejections_are_aggregated_with_bounded_diagnostic_samples(
+    tmp_path: Path, staging_db: sqlite3.Connection
+) -> None:
+    source = _write_song_file(
+        tmp_path / "charts_songs_daily.csv",
+        [
+            ["2017-01-01", "Global", "top200", "1", "track-a", "Song A", "Artist", "10"],
+            ["2017-01-01", "Canada", "top200", "2", "track-b", "Song B", "Artist", "10"],
+            ["2017-01-01", "US", "viral50", "51", "track-c", "Song C", "Artist", "10"],
+        ],
+    )
+
+    result = process_file(staging_db, DATASETS[0], source, chunk_size=1)
+
+    assert result["rows_rejected"] == 3
+    assert staging_db.execute(
+        "SELECT SUM(rejected_count) FROM staged_rejection_counts"
+    ).fetchone()[0] == 3
+    assert staging_db.execute(
+        "SELECT detail, rejected_count FROM staged_rejection_counts "
+        "WHERE reason='non_us_or_unknown_region' ORDER BY detail"
+    ).fetchall() == [("Canada", 1), ("Global", 1)]
+    assert staging_db.execute(
+        "SELECT COUNT(*) FROM staged_rejection_samples"
+    ).fetchone()[0] == 3
+    assert staging_db.execute(
+        "SELECT COUNT(*) FROM staged_rejections"
+    ).fetchone()[0] == 0
+
+
+def test_compact_staging_reconciles_and_preserves_the_original_database(
+    tmp_path: Path,
+) -> None:
+    source_file = _write_song_file(
+        tmp_path / "charts_songs_daily.csv",
+        [
+            ["2017-01-01", "US", "top200", "1", "track-a", "Song A", "Artist", "0"],
+            ["2017-01-01", "Global", "top200", "2", "track-b", "Song B", "Artist", "10"],
+            ["2017-01-01", "US", "viral50", "51", "track-c", "Song C", "Artist", "10"],
+        ],
+    )
+    source_database = tmp_path / "original.sqlite"
+    source_connection = sqlite3.connect(source_database)
+    _initialize_staging(source_connection)
+    process_file(source_connection, DATASETS[0], source_file)
+    digest = source_connection.execute(
+        "SELECT file_sha256 FROM staged_files"
+    ).fetchone()[0]
+    source_connection.execute(
+        """
+        INSERT INTO staged_rejections(
+            dataset_id, dataset_version, file_sha256, source_row, reason, raw_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            DATASETS[0].dataset_id,
+            DATASETS[0].version,
+            digest,
+            3,
+            "position_out_of_range:50",
+            json.dumps(
+                {
+                    "date": "2017-01-01",
+                    "region": "US",
+                    "chart": "viral50",
+                    "rank": "51",
+                    "track_id": "track-c",
+                    "title": "Song C",
+                    "artist": "Artist",
+                    "streams": "10",
+                }
+            ),
+        ),
+    )
+    source_connection.commit()
+    original_observations = source_connection.execute(
+        "SELECT COUNT(*) FROM staged_observations"
+    ).fetchone()[0]
+    source_connection.close()
+
+    target_database = tmp_path / "compact.sqlite"
+    stages: list[str] = []
+    result = build_compact_staging_database(
+        source_database,
+        source_file,
+        target_database,
+        DATASETS[0],
+        chunk_size=1,
+        progress_callback=lambda event: stages.append(str(event["stage"])),
+    )
+
+    assert result["status"] == "complete"
+    assert result["rows_seen"] == 3
+    assert result["rows_accepted"] == 1
+    assert result["rows_rejected"] == 2
+    assert result["integrity_check"] == "ok"
+    assert result["rejection_samples"] == 2
+    assert "preflight_complete" in stages
+    assert "complete" in stages
+    assert source_database.is_file()
+    assert not target_database.with_name(target_database.name + ".building").exists()
+
+    original = sqlite3.connect(source_database)
+    compact = sqlite3.connect(target_database)
+    try:
+        assert original.execute(
+            "SELECT COUNT(*) FROM staged_observations"
+        ).fetchone()[0] == original_observations
+        assert original.execute(
+            "SELECT SUM(rejected_count) FROM staged_rejection_counts"
+        ).fetchone()[0] == 2
+        assert compact.execute(
+            "SELECT COUNT(*) FROM staged_observations"
+        ).fetchone()[0] == 1
+        assert compact.execute(
+            "SELECT SUM(rejected_count) FROM staged_rejection_counts"
+        ).fetchone()[0] == 2
+        assert compact.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        original.close()
+        compact.close()
+    compact = sqlite3.connect(target_database)
+    try:
+        compact.execute(
+            "DELETE FROM staged_rejection_samples "
+            "WHERE reason LIKE 'position_out_of_range:%'"
+        )
+        compact.commit()
+    finally:
+        compact.close()
+    added = supplement_rank_rejection_samples(
+        source_database,
+        source_file,
+        target_database,
+        DATASETS[0],
+    )
+    assert added == 1
+    compact = sqlite3.connect(target_database)
+    try:
+        assert compact.execute(
+            "SELECT detail FROM staged_rejection_samples "
+            "WHERE reason LIKE 'position_out_of_range:%'"
+        ).fetchone()[0] == "viral50:rank=51"
+    finally:
+        compact.close()
+
+
+def test_compact_staging_refuses_insufficient_space_before_building(
+    tmp_path: Path,
+) -> None:
+    source_file = _write_song_file(
+        tmp_path / "charts_songs_daily.csv",
+        [["2017-01-01", "US", "top200", "1", "track-a", "Song A", "Artist", "1"]],
+    )
+    source_database = tmp_path / "source.sqlite"
+    connection = sqlite3.connect(source_database)
+    _initialize_staging(connection)
+    process_file(connection, DATASETS[0], source_file)
+    connection.close()
+
+    target = tmp_path / "insufficient.sqlite"
+    with pytest.raises(OSError, match="Insufficient free space"):
+        build_compact_staging_database(
+            source_database,
+            source_file,
+            target,
+            DATASETS[0],
+            minimum_free_bytes=2**62,
+        )
+    assert not target.exists()
+    assert not target.with_name(target.name + ".building").exists()
+
+
+def test_chart_quality_reports_separate_calendar_gaps_and_invalid_viral_ranks(
+    tmp_path: Path, staging_db: sqlite3.Connection
+) -> None:
+    source = _write_song_file(
+        tmp_path / "charts_songs_daily.csv",
+        [
+            ["2017-01-01", "US", "top200", "1", "track-a", "Song A", "Artist", "0"],
+            ["2017-01-01", "US", "top200", "1", "track-a", "Song A", "Artist", "5"],
+            ["2017-01-03", "USA", "top200", "2", "track-b", "Song B", "Artist", "7"],
+            ["2017-01-03", "US", "viral50", "51", "track-c", "Song C", "Artist", "9"],
+        ],
+    )
+    process_file(staging_db, DATASETS[0], source)
+
+    summary = write_chart_quality_reports(
+        staging_db,
+        tmp_path / "quality",
+        DATASETS[0].dataset_id,
+        DATASETS[0].version,
+    )
+
+    assert summary["accepted_rows"] == 3
+    assert summary["rejected_rows"] == 1
+    assert summary["rejection_aggregates_reconcile"] is True
+    assert summary["invalid_rank_sample_count"] == 1
+    top200_2017 = next(
+        row
+        for row in summary["chart_summaries"]["top200"]["years"]
+        if row["year"] == 2017
+    )
+    assert top200_2017["observations"] == 3
+    assert top200_2017["zero_stream_observations"] == 1
+    assert top200_2017["incomplete_observed_dates"] == 2
+    assert top200_2017["duplicate_identity_groups"] == 1
+    assert top200_2017["conflicting_stream_identity_groups"] == 1
+    daily = list(
+        csv.DictReader(
+            (tmp_path / "quality" / "chart_quality_by_date.csv").open(
+                encoding="utf-8-sig", newline=""
+            )
+        )
+    )
+    jan_two = next(
+        row
+        for row in daily
+        if row["chart_name"] == "top200" and row["chart_date"] == "2017-01-02"
+    )
+    assert jan_two["status"] == "GAP_CANDIDATE_WITHIN_OBSERVED_SPAN"
+    rank_samples = list(
+        csv.DictReader(
+            (tmp_path / "quality" / "invalid_rank_samples.csv").open(
+                encoding="utf-8-sig", newline=""
+            )
+        )
+    )
+    assert rank_samples[0]["detail"] == "viral50:rank=51"
+
+
+def test_mgdplus_archive_audit_is_research_only_and_compares_stable_chart_keys(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "MGDplus.zip"
+    chart_rows = [
+        ["4Km5HrUvYTaSUfiSGPJeQR", "Song A", "Artist A", "1", "1,000", "0", "2017-01-01", "Top 200", "us"],
+        ["4Km5HrUvYTaSUfiSGPJeQR", "Song A", "Artist A", "1", "1,000", "0", "2017-01-01", "Top 200", "us"],
+        ["3n3Ppam7vgaVa1iaRUc9Lp", "Song B", "Artist B", "1", "2,000", "0", "2017-01-02", "Top 200", "us"],
+    ]
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        chart_buffer = io.StringIO(newline="")
+        writer = csv.writer(chart_buffer, delimiter="\t")
+        writer.writerow(
+            ["ID", "Track", "Artist", "Position", "Streams", "Trend", "Date", "Chart", "market"]
+        )
+        writer.writerows(chart_rows)
+        archive.writestr(
+            "charts/regional/spotify_charts_regional_us.csv",
+            chart_buffer.getvalue(),
+        )
+        archive.writestr(
+            "songs/regional/us/us-hit_songs-2017.csv",
+            "song_id\tartist_id\tsong_name\nsong-a\tartist-a\tSong A\n",
+        )
+        archive.writestr(
+            "artists/us/us-artists-2017.csv",
+            "artist_id\tname\nartist-a\tArtist A\n",
+        )
+        archive.writestr("charts/../outside.csv", "not extracted\n")
+
+    comparison_database = tmp_path / "compact.sqlite"
+    connection = sqlite3.connect(comparison_database)
+    _initialize_staging(connection)
+    comparison_file = _write_song_file(
+        tmp_path / "charts_songs_daily.csv",
+        [
+            [
+                "2017-01-01",
+                "US",
+                "top200",
+                "1",
+                "4Km5HrUvYTaSUfiSGPJeQR",
+                "Song A",
+                "Artist A",
+                "1000",
+            ]
+        ],
+    )
+    process_file(connection, DATASETS[1], comparison_file)
+    connection.close()
+
+    summary = audit_archive(
+        archive_path,
+        tmp_path / "mgdplus_reports",
+        compact_database=comparison_database,
+        dataset_id=DATASETS[1].dataset_id,
+        dataset_version=DATASETS[1].version,
+        start_year=2017,
+        end_year=2018,
+    )
+
+    assert summary["archive_crc_test"] == "passed"
+    assert summary["unsafe_member_path_count"] == 1
+    assert summary["extraction_performed"] is False
+    assert summary["production_import_performed"] is False
+    assert summary["us_chart"]["rows"] == 3
+    assert summary["us_chart"]["distinct_dates"] == 2
+    assert summary["us_chart"]["duplicate_identity_groups"] == 1
+    assert summary["us_chart"]["duplicate_extra_rows"] == 1
+    assert summary["us_chart"]["duplicate_identity_groups_with_stream_conflicts"] == 0
+    assert summary["us_chart"]["market_values"] == {"us": 3}
+    assert summary["viral_chart_file_present"] is False
+    assert summary["metadata_members"]["artist_id_fields_found"] == ["artist_id"]
+    assert summary["metadata_members"]["album_related_fields_found"] == []
+    assert summary["cross_source_comparison"]["shared_keys"] == 1
+    assert summary["cross_source_comparison"]["same_stream_keys"] == 1
+    with (tmp_path / "mgdplus_reports" / "zenodo_mgdplus_us_chart_by_date.csv").open(
+        encoding="utf-8-sig", newline=""
+    ) as stream:
+        dates = list(csv.DictReader(stream))
+    assert len(dates) == 2
 
 
 def test_report_detects_cross_source_conflicts_without_summing(
@@ -463,7 +882,7 @@ def test_staging_schema_migration_preserves_rows_but_does_not_promote_old_approv
         "SELECT 1 FROM source_rights WHERE dataset_id=? AND dataset_version=85",
         ("example/source",),
     ).fetchone() is None
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
     connection.close()
 
 
