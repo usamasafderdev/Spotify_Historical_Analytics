@@ -57,7 +57,7 @@ def test_duplicate_imports_and_backup_restore(tmp_path: Path) -> None:
         assert backup_connection.execute(
             "SELECT COUNT(*) FROM chart_records WHERE source = ?", ("Test Source",)
         ).fetchone()[0] == 5
-        assert backup_connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert backup_connection.execute("PRAGMA user_version").fetchone()[0] == 2
     finally:
         backup_connection.close()
 

@@ -7,7 +7,7 @@ Build a professional Windows desktop analytics application for a client analyzin
 - Windows 10 / 11, 64-bit
 - Python 3.12+ and PySide6 desktop UI
 - SQLite for local storage
-- Data imported from user-supplied CSV/XLSX files
+- Data imported from user-supplied CSV/XLSX and supported CSV.GZ files
 - No scraping, unauthorized API usage, or unsupported dataset bundling
 - No real Spotify branding, credentials, or login flow
 - Data must be clearly marked, provenance-aware, and quality-flagged
@@ -34,6 +34,6 @@ The project must provide an initial working Windows app foundation with a docume
 ## Phase 7 implementation status
 
 - Implemented: read-only chunked MGD+ and Dhruvil schema adapters with source-file digest and row provenance; stable URL ID extraction; streamless Viral 50 separation; exact multi-artist metadata mapping; expanded production coverage inventory and 2017–2026 year display; explicit research/production boundary; and stronger evidence/scope checks for research-staging production imports.
-- Not implemented: a complete persisted 13-stage GUI import workflow or independent legal-rights verification. Manual user-file import remains user-supplied and rights-unverified, and the new adapters do not automatically stage or import source data.
+- Current import interface: one dialog with automatic MGD+/Dhruvil schema detection, same-dialog optional mapping, coverage/USA preview, background validation, transactional import, safe cancellation, backups, and integrity checks. The earlier 13-stage wizard and mandatory JSON manifest were removed at the user's request. The separate research pipeline's approval safeguards remain unchanged. Metadata-only import stays disabled; explicit associations can be imported with chart rows.
 - Data status: no authorized historical real data confirmed in production; research sources remain unverified; album mappings and 2022–2026 authorized coverage are unavailable.
-- Release status: test and build commands must be run for the current worktree. Full Windows desktop DPI review, signed EXE and installer readiness are not claimed.
+- Release status: build, packaged execution, automated GUI evidence, and remaining native desktop/DPI limitations are recorded in [SIMPLE_IMPORT_INTERFACE.md](SIMPLE_IMPORT_INTERFACE.md). Signing and installer readiness are not inferred from an EXE build.

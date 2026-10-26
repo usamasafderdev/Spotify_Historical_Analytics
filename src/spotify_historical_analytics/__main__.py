@@ -25,6 +25,13 @@ def main() -> int:
         return run_packaged_export_checks()
 
     app = QApplication(sys.argv)
+    from .ui.theme import apply_dark_theme
+    apply_dark_theme(app)
+    if "--import-visual-qa" in sys.argv:
+        from pathlib import Path
+        from .ui.visual_qa import run_visual_qa
+        index = sys.argv.index("--import-visual-qa")
+        return run_visual_qa(Path(sys.argv[index + 1]), int(sys.argv[index + 2]), int(sys.argv[index + 3]))
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
     app.setOrganizationName("US Music Charts Analytics")

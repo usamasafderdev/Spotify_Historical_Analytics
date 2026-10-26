@@ -241,11 +241,14 @@ def test_schema_upgrade_is_idempotent_and_preserves_existing_rows(tmp_path: Path
     legacy.close()
 
     upgraded = DatabaseManager(path)
-    assert upgraded.connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert upgraded.connection.execute("PRAGMA user_version").fetchone()[0] == 2
     assert upgraded.connection.execute("SELECT streams FROM chart_records").fetchone()[0] == 900
     assert "metadata_batch_id" in {
         row["name"] for row in upgraded.connection.execute("PRAGMA table_info(track_albums)")
     }
+    assert upgraded.connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='import_rights_approvals'"
+    ).fetchone()
     assert upgraded.connection.execute(
         "SELECT artist_name FROM artists WHERE artist_id = 'legacy-artist-id'"
     ).fetchone()[0] == "Legacy Artist"

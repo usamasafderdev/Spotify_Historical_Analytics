@@ -76,7 +76,7 @@ def test_dashboard_navigation_filters_and_database_widgets(tmp_path: Path) -> No
     window.show()
     wait_for_dashboard(window)
 
-    assert window.pages.count() == 6
+    assert window.pages.count() == 7
     assert window.kpis[0].value.text() == "49,500"
     assert window.songs_table.rowCount() == 2
     assert len(window.streams_chart.plot.listDataItems()) == 1
@@ -313,7 +313,7 @@ def test_first_run_empty_state_and_demo_preview_widgets(tmp_path: Path) -> None:
     assert window.overview_empty.text() == "No historical chart data is loaded yet."
     assert window.overview_empty.isVisible()
     assert window.overview_empty_actions.isVisible()
-    assert window.empty_import_button.text() == "Import Authorized Dataset"
+    assert window.empty_import_button.text() == "Import Dataset"
     assert window.empty_demo_button.text() == "Preview Demo Dashboard"
     assert window.empty_sources_button.text() == "View Data Sources"
     assert not window.overview_data.isVisible()

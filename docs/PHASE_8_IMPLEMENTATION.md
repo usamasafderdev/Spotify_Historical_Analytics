@@ -27,22 +27,40 @@ scaling are still unverified.
 
 ## Staged GUI import status
 
-The requested 13-stage, persisted guided import wizard is **not complete**. Current CSV/XLSX imports continue to use the existing background worker and transaction-safe import functions. The source adapters are read-only and are not wired to a GUI stage database or approval workflow. Current manual file import does not independently verify rights; provenance remains user-supplied and unverified. Research-source/version production imports continue to use the explicit `source_rights` gate in the separate research pipeline. No MGD+ or Dhruvil data was imported.
+Phase 8B implements the persisted, 13-stage CSV/XLSX wizard, separate chunked
+staging database, resumable checkpoints, rights-manifest/evidence hash checks,
+transactional production import, identity mapping, integrity check, and
+first-run recovery prompt. Focused synthetic workflow tests are documented in
+[IMPORT_WIZARD_QA.md](./IMPORT_WIZARD_QA.md) and
+[PHASE_8B_IMPORT_WORKFLOW.md](./PHASE_8B_IMPORT_WORKFLOW.md).
 
-See [IMPORT_WIZARD_QA.md](./IMPORT_WIZARD_QA.md) for verified behavior and blockers.
+The current generic mapping wizard is not automatically wired to source-specific
+MGD+ or Dhruvil adapters. The separate metadata-only import control is disabled
+until it is rights-gated. No MGD+ or Dhruvil research data was imported.
 
 ## Release status
 
-The Phase 8 Windows x64 EXE was rebuilt from the current source. The build
-script's offscreen startup and export checks passed; `scripts/verify_release.ps1`
-also passed startup, restart persistence, database integrity, and six CSV/XLSX
-export checks. The bundle scan found no database, TSV, MGD+, Dhruvil, staging,
-or research data files. EXE SHA-256:
-`E097AFC64898817795FEE3AD32973204581A6521173D08E286652023EF379DEC`.
+The current Phase 8B Windows x64 EXE was rebuilt from this source after the
+full test suite passed. Build smoke tests, `scripts/verify_release.ps1`
+(startup, restart persistence, SQLite integrity, six CSV/XLSX export checks),
+and the packaged synthetic-dashboard smoke test passed. A bundle scan found no
+SQLite database, TSV, MGD+/Dhruvil source, research staging, or import-session
+database. EXE SHA-256:
+`F5027F776D94CA7E389E04619A37B10F017C01171282143DD6FBF0121FB6F185`.
 
-The installer was not compiled: Inno Setup 6 is not installed in this
-environment. Native GUI and DPI inspection remain outstanding. The persisted
-13-stage import wizard is not implemented, large-file import is still not
-chunked, the 500k analytics targets remain unmet, source permissions are
-unverified, and production history remains empty. Client delivery is not
-approved.
+The automated suite finished with **106 passed**. `python -m compileall -q
+src scripts tests` and `git diff --check` passed. Synthetic benchmark results
+are in [PERFORMANCE_BEFORE_AFTER.md](./PERFORMANCE_BEFORE_AFTER.md); the
+500k summary and artist latency goals remain unmet.
+
+The developer production database observed during this work is
+`%LOCALAPPDATA%\USMusicChartsAnalytics\database\analytics.db`: it had 0 chart
+rows, 0 synthetic rows, and schema version 1 when checked read-only. It was
+not modified by tests or packaged smoke tests; the next normal application
+startup will apply the additive schema version 2 initialization. Research
+staging remains isolated and no candidate rows were imported.
+
+The installer was not compiled because Inno Setup 6 is unavailable. Native
+interactive Windows visual inspection and 100%/125%/150% DPI checks remain
+outstanding. MGD+/Dhruvil permissions remain unverified and client delivery is
+not approved.

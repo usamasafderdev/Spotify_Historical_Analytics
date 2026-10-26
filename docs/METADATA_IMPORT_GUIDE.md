@@ -1,5 +1,12 @@
 # Artist and Album Metadata Import
 
+> **Temporarily unavailable in the desktop UI.** The legacy metadata-only
+> importer does not use the persisted rights-review and staging workflow, so
+> its Settings control is disabled. Do not use the legacy importer to write
+> metadata into a production database. An approved chart-data import can carry
+> explicitly mapped artist/album fields. A separate metadata-only staged
+> workflow is future work.
+
 Metadata import uses only user-supplied CSV/XLSX data. The application does not scrape Spotify pages, call restricted endpoints, or infer IDs from names.
 
 ## Required identities

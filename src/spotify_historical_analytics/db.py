@@ -67,6 +67,8 @@ class DatabaseManager:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA journal_mode = WAL")
+        # Keep DISTINCT/GROUP BY scratch trees off the disk; no persistent summaries.
+        self.connection.execute("PRAGMA temp_store = MEMORY")
         try:
             self.initialize()
         except Exception:
@@ -75,9 +77,9 @@ class DatabaseManager:
 
     def initialize(self) -> None:
         schema_version = int(self.connection.execute("PRAGMA user_version").fetchone()[0])
-        if schema_version > 1:
+        if schema_version > 2:
             raise RuntimeError(
-                f"Database schema version {schema_version} is newer than this application supports (1)."
+                f"Database schema version {schema_version} is newer than this application supports (2)."
             )
         self.connection.executescript(
             """
@@ -171,6 +173,18 @@ class DatabaseManager:
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
+            CREATE TABLE IF NOT EXISTS import_rights_approvals (
+                batch_id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL,
+                dataset_version INTEGER NOT NULL,
+                reviewed_by TEXT NOT NULL,
+                reviewed_at TEXT NOT NULL,
+                evidence_path TEXT NOT NULL,
+                evidence_sha256 TEXT NOT NULL,
+                approval_manifest_sha256 TEXT NOT NULL,
+                rights_scopes_json TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_chart_records_date ON chart_records(chart_date, chart_type, country);
             CREATE INDEX IF NOT EXISTS idx_chart_records_source ON chart_records(source, chart_date);
             CREATE INDEX IF NOT EXISTS idx_chart_records_track ON chart_records(track_id, track_name);
@@ -222,7 +236,7 @@ class DatabaseManager:
         self.connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_track_albums_album_status ON track_albums(album_id, mapping_status, track_id)"
         )
-        self.connection.execute("PRAGMA user_version = 1")
+        self.connection.execute("PRAGMA user_version = 2")
         self.connection.commit()
 
     def _add_missing_columns(self, table_name: str, columns: dict[str, str]) -> None:
@@ -482,54 +496,36 @@ class DatabaseManager:
         where_clause = " AND ".join(filters)
 
         sql = f"""
-            WITH artist_observations AS (
-                SELECT
-                    'id:' || a.artist_id AS artist_key,
-                    a.artist_id AS artist_id,
-                    COALESCE(a.artist_name, '[Unlabeled artist ID]') AS artist_name,
-                    SUM(c.streams) AS charting_song_streams,
-                    COUNT(DISTINCT COALESCE(c.track_id, c.track_name || '|' || c.artist_names)) AS track_count,
-                    COUNT(*) AS chart_appearances,
-                    MIN(c.position) AS best_position,
-                    MIN(c.chart_date) AS first_appearance,
-                    MAX(c.chart_date) AS latest_appearance,
-                    'Full-credit by supplied artist ID' AS attribution
+            WITH supplied AS MATERIALIZED (
+                SELECT DISTINCT track_id, artist_id FROM track_artists
+                WHERE mapping_status = 'id_match'
+            ), attributed AS (
+                SELECT c.*,
+                       CASE WHEN ta.artist_id IS NULL THEN 'credit:' || c.artist_names
+                            ELSE 'id:' || ta.artist_id END AS artist_key,
+                       ta.artist_id AS resolved_id,
+                       CASE WHEN ta.artist_id IS NULL THEN c.artist_names
+                            ELSE COALESCE(a.artist_name, '[Unlabeled artist ID]') END AS resolved_name
                 FROM chart_records c
-                JOIN (
-                    SELECT DISTINCT track_id, artist_id
-                    FROM track_artists WHERE mapping_status = 'id_match'
-                ) ta
+                LEFT JOIN supplied ta
                   ON ta.track_id = COALESCE(c.track_id, c.track_name || '|' || c.artist_names)
-                JOIN artists a ON a.artist_id = ta.artist_id
-                WHERE {where_clause}
-                GROUP BY a.artist_id, a.artist_name
-                UNION ALL
-                SELECT
-                    'credit:' || c.artist_names AS artist_key,
-                    NULL AS artist_id,
-                    c.artist_names AS artist_name,
-                    SUM(c.streams) AS charting_song_streams,
-                    COUNT(DISTINCT COALESCE(c.track_id, c.track_name || '|' || c.artist_names)) AS track_count,
-                    COUNT(*) AS chart_appearances,
-                    MIN(c.position) AS best_position,
-                    MIN(c.chart_date) AS first_appearance,
-                    MAX(c.chart_date) AS latest_appearance,
-                    'Unresolved credited string; not split' AS attribution
-                FROM chart_records c
-                WHERE {where_clause}
-                  AND NOT EXISTS (
-                      SELECT 1 FROM track_artists ta
-                      WHERE ta.track_id = COALESCE(c.track_id, c.track_name || '|' || c.artist_names)
-                        AND ta.mapping_status = 'id_match'
-                  )
-                GROUP BY c.artist_names
+                LEFT JOIN artists a ON a.artist_id = ta.artist_id
+                WHERE {where_clause} AND (ta.artist_id IS NULL OR a.artist_id IS NOT NULL)
             )
-            SELECT * FROM artist_observations
-            WHERE (? IS NULL OR artist_name LIKE ? COLLATE NOCASE OR artist_id LIKE ? COLLATE NOCASE)
+            SELECT artist_key, resolved_id AS artist_id, resolved_name AS artist_name,
+                   SUM(streams) AS charting_song_streams,
+                   COUNT(DISTINCT COALESCE(track_id, track_name || '|' || artist_names)) AS track_count,
+                   COUNT(*) AS chart_appearances, MIN(position) AS best_position,
+                   MIN(chart_date) AS first_appearance, MAX(chart_date) AS latest_appearance,
+                   CASE WHEN resolved_id IS NULL THEN 'Unresolved credited string; not split'
+                        ELSE 'Full-credit by supplied artist ID' END AS attribution
+            FROM attributed
+            WHERE (? IS NULL OR resolved_name LIKE ? COLLATE NOCASE OR resolved_id LIKE ? COLLATE NOCASE)
+            GROUP BY artist_key, resolved_id, resolved_name
             ORDER BY charting_song_streams DESC, artist_name ASC, artist_key ASC
             LIMIT ?
         """
-        query_params = [*params, *params, search, f"%{search}%" if search else "", f"%{search}%" if search else "", limit]
+        query_params = [*params, search, f"%{search}%" if search else "", f"%{search}%" if search else "", limit]
         return [dict(row) for row in self.connection.execute(sql, query_params).fetchall()]
 
     def get_artist_detail(
@@ -953,8 +949,10 @@ class DatabaseManager:
                        ) THEN c.track_id END) AS album_mapped_track_ids,
                        MIN(c.chart_date) AS earliest,
                        MAX(c.chart_date) AS latest,
-                       MAX(CASE WHEN c.source = 'DEMO / SYNTHETIC' THEN 1 ELSE 0 END) AS is_demo
+                       MAX(CASE WHEN c.source = 'DEMO / SYNTHETIC' THEN 1 ELSE 0 END) AS is_demo,
+                       MAX(CASE WHEN ra.batch_id IS NOT NULL THEN 1 ELSE 0 END) AS rights_approved
                 FROM chart_records c
+                LEFT JOIN import_rights_approvals ra ON ra.batch_id = c.batch_id
                 GROUP BY c.source, c.source_license, c.chart_type, c.country
                 ORDER BY c.source, c.chart_type, c.country
             """

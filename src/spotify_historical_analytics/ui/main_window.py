@@ -48,6 +48,8 @@ from ..metadata_importer import (
 from ..services.analytics import AnalyticsService
 from ..resources import resource_path
 from ..settings import SettingsStore
+from .theme import apply_dark_theme
+from .import_dialog import ImportDialog
 from .workers import (
     DashboardQueryWorker,
     DetailQueryWorker,
@@ -60,7 +62,7 @@ COLORS = {
     "background": "#0E1117",
     "sidebar": "#141923",
     "card": "#1B2230",
-    "accent": "#8B5CF6",
+    "accent": "#6D28D9",
     "accent_light": "#A78BFA",
     "text": "#F8FAFC",
     "muted": "#94A3B8",
@@ -74,6 +76,7 @@ PAGES = [
     ("Top Artists", "A", "artists"),
     ("Top Albums", "L", "albums"),
     ("Data Sources & Coverage", "D", "coverage"),
+    ("Data Management / Import", "M", "import"),
     ("Settings", "T", "settings"),
 ]
 
@@ -278,6 +281,9 @@ class MainWindow(QMainWindow):
                 f"Details: {self.settings.load_error}",
             )
         self._production_db = self.db
+        self._import_staging_path = (
+            self.db.db_path.parent.parent / "staging" / "import_sessions.sqlite3"
+        )
         self.analytics = AnalyticsService(self.db)
         self.active_start: str | None = None
         self.active_end: str | None = None
@@ -304,14 +310,18 @@ class MainWindow(QMainWindow):
         self.refresh_dashboard()
 
     def _build_ui(self) -> None:
+        apply_dark_theme(QApplication.instance())
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon(str(resource_path("assets/app_icon.ico"))))
-        self.resize(1500, 920)
-        self.setMinimumSize(1120, 700)
+        available = self.screen().availableGeometry()
+        self.setMinimumSize(760, 420)
+        self.resize(min(1500, available.width() - 48), min(920, available.height() - 64))
         self.setStyleSheet(
             f"""
             QWidget {{ color:{COLORS['text']}; font-family:'Segoe UI'; font-size:13px; }}
             QLabel {{ background:transparent; color:{COLORS['text']}; }}
+            QDialog, QMessageBox, QProgressDialog {{ background:#141923; color:#F8FAFC; }}
+            QPushButton#primary:disabled, QPushButton:disabled {{ color:#A8B3C7; background:#202938; }}
             QMainWindow {{ background:{COLORS['background']}; }}
             QWidget#centralRoot, QWidget#mainContent, QScrollArea#contentScroll {{ background:{COLORS['background']}; }}
             QScrollArea#contentScroll {{ border:0; }}
@@ -396,8 +406,10 @@ class MainWindow(QMainWindow):
         header = QHBoxLayout()
         titles = QVBoxLayout()
         self.page_title = QLabel("Overview")
+        self.page_title.setWordWrap(True)
         self.page_title.setStyleSheet("font-size:26px; font-weight:700;")
         self.page_description = QLabel("Explore imported US chart observations and their reporting coverage.")
+        self.page_description.setWordWrap(True)
         self.page_description.setObjectName("muted")
         titles.addWidget(self.page_title)
         titles.addWidget(self.page_description)
@@ -406,17 +418,19 @@ class MainWindow(QMainWindow):
         self.market_badge = QLabel("●  UNITED STATES")
         self.market_badge.setStyleSheet(f"color:{COLORS['green']}; font-weight:700;")
         header.addWidget(self.market_badge)
-        self.import_button = QPushButton("Import data")
+        self.import_button = QPushButton("Import Dataset")
         self.import_button.setObjectName("primary")
-        self.import_button.clicked.connect(self.import_file)
+        self.import_button.clicked.connect(self.open_import_dialog)
         self.demo_button = QPushButton("Preview synthetic data")
         self.demo_button.clicked.connect(self.load_demo_data)
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_dashboard)
-        header.addWidget(self.import_button)
-        header.addWidget(self.demo_button)
-        header.addWidget(self.refresh_button)
         content_layout.addLayout(header)
+        actions = QGridLayout()
+        actions.addWidget(self.import_button, 0, 0)
+        actions.addWidget(self.demo_button, 0, 1)
+        actions.addWidget(self.refresh_button, 1, 0)
+        content_layout.addLayout(actions)
 
         filters = QFrame()
         filters.setObjectName("card")
@@ -437,34 +451,34 @@ class MainWindow(QMainWindow):
         self.start_edit.setDisplayFormat("MMM d, yyyy")
         self.start_edit.setMinimumWidth(132)
         self.start_edit.setToolTip("Inclusive start date")
-        filter_layout.addWidget(QLabel("FROM"), 0, 2)
-        filter_layout.addWidget(self.start_edit, 0, 3)
+        filter_layout.addWidget(QLabel("FROM"), 1, 0)
+        filter_layout.addWidget(self.start_edit, 1, 1)
         self.end_edit = QDateEdit()
         self.end_edit.setCalendarPopup(True)
         self.end_edit.setDisplayFormat("MMM d, yyyy")
         self.end_edit.setMinimumWidth(132)
         self.end_edit.setToolTip("Inclusive end date")
-        filter_layout.addWidget(QLabel("TO"), 0, 4)
-        filter_layout.addWidget(self.end_edit, 0, 5)
+        filter_layout.addWidget(QLabel("TO"), 1, 2)
+        filter_layout.addWidget(self.end_edit, 1, 3)
         apply_button = QPushButton("Apply")
         apply_button.setObjectName("primary")
         apply_button.clicked.connect(self.apply_filters)
-        filter_layout.addWidget(apply_button, 0, 6)
+        filter_layout.addWidget(apply_button, 0, 2)
         reset_button = QPushButton("All available")
         reset_button.clicked.connect(self.reset_filters)
-        filter_layout.addWidget(reset_button, 0, 7)
+        filter_layout.addWidget(reset_button, 0, 3)
         self.preset_combo = QComboBox()
         self.preset_combo.setMinimumWidth(160)
         self.preset_combo.addItem("Date presets", None)
         for label, days in [("Last 7 days", 7), ("Last 30 days", 30), ("Last 90 days", 90), ("Last year", 365)]:
             self.preset_combo.addItem(label, days)
         self.preset_combo.currentIndexChanged.connect(self._apply_preset)
-        filter_layout.addWidget(self.preset_combo, 1, 0, 1, 2)
+        filter_layout.addWidget(self.preset_combo, 2, 0, 1, 2)
         self.data_status = QLabel("No imported chart data")
         self.data_status.setObjectName("muted")
-        filter_layout.addWidget(self.data_status, 1, 2, 1, 6, Qt.AlignRight)
+        filter_layout.addWidget(self.data_status, 2, 2, 1, 2, Qt.AlignRight)
         filter_layout.setColumnStretch(3, 1)
-        filter_layout.setColumnStretch(5, 1)
+        filter_layout.setColumnStretch(1, 1)
         content_layout.addWidget(filters)
 
         self.demo_banner = QLabel("DEMO / SYNTHETIC DATA is isolated and excluded from all real-data metrics and charts.")
@@ -478,6 +492,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self._build_artists_page())
         self.pages.addWidget(self._build_albums_page())
         self.pages.addWidget(self._build_coverage_page())
+        self.pages.addWidget(self._build_import_page())
         self.pages.addWidget(self._build_settings_page())
         self.pages.setMinimumSize(0, 0)
         self.pages.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
@@ -533,7 +548,7 @@ class MainWindow(QMainWindow):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(10)
         actions_layout.addStretch()
-        import_authorized_button = QPushButton("Import Authorized Dataset")
+        import_authorized_button = QPushButton("Import Dataset")
         import_authorized_button.setObjectName("primary")
         import_authorized_button.clicked.connect(self.import_file)
         self.empty_import_button = import_authorized_button
@@ -720,6 +735,38 @@ class MainWindow(QMainWindow):
         layout.addWidget(card, 1)
         return page
 
+    def _build_import_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        card = QFrame()
+        card.setObjectName("card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(24, 22, 24, 22)
+        title = QLabel("Import Historical Music Data")
+        title.setObjectName("panelTitle")
+        detail = QLabel(
+            "Select a CSV, XLSX, or supported CSV.GZ file. Preview its source, USA records, date coverage, and validation results, then import it in the background."
+        )
+        detail.setObjectName("muted")
+        detail.setWordWrap(True)
+        button = QPushButton("Import Dataset")
+        button.setObjectName("primary")
+        button.clicked.connect(self.open_import_dialog)
+        status = QLabel(
+            "Only user-selected files are imported. Source terms still apply; research staging databases are never imported automatically."
+        )
+        status.setObjectName("muted")
+        status.setWordWrap(True)
+        card_layout.addWidget(title)
+        card_layout.addWidget(detail)
+        card_layout.addWidget(button, 0, Qt.AlignLeft)
+        card_layout.addWidget(status)
+        card_layout.addStretch()
+        layout.addWidget(card, 1)
+        self.import_page_button = button
+        return page
+
     def _build_coverage_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -728,7 +775,14 @@ class MainWindow(QMainWindow):
         self.coverage_summary.setObjectName("muted")
         self.coverage_summary.setWordWrap(True)
         layout.addWidget(self.coverage_summary)
-        layout.addWidget(QLabel("Import sources and observed date ranges"))
+        heading = QHBoxLayout()
+        heading.addWidget(QLabel("Import sources and observed date ranges"))
+        heading.addStretch()
+        import_button = QPushButton("Import Dataset")
+        import_button.setObjectName("primary")
+        import_button.clicked.connect(self.open_import_dialog)
+        heading.addWidget(import_button)
+        layout.addLayout(heading)
         self.source_table = QTableWidget(0, 13)
         self.source_table.setHorizontalHeaderLabels(
             [
@@ -788,8 +842,18 @@ class MainWindow(QMainWindow):
         backup_button.clicked.connect(self.backup_database)
         card_layout.addWidget(backup_button, 0, Qt.AlignLeft)
         self.metadata_button = QPushButton("Import artist / album metadata")
-        self.metadata_button.clicked.connect(self.import_metadata)
+        self.metadata_button.setEnabled(False)
+        self.metadata_button.setToolTip(
+            "Import artist and album associations with your chart dataset using explicit IDs and names."
+        )
         card_layout.addWidget(self.metadata_button, 0, Qt.AlignLeft)
+        metadata_rights_note = QLabel(
+            "Include stable artist/album IDs and verified names in your chart dataset "
+            "to import those associations."
+        )
+        metadata_rights_note.setObjectName("muted")
+        metadata_rights_note.setWordWrap(True)
+        card_layout.addWidget(metadata_rights_note)
         self.mapping_summary_label = QLabel("")
         self.mapping_summary_label.setObjectName("muted")
         card_layout.addWidget(self.mapping_summary_label)
@@ -830,6 +894,7 @@ class MainWindow(QMainWindow):
             "Compare credited artist totals from imported observations.",
             "Review album analytics availability.",
             "Inspect source provenance and observed historical coverage.",
+            "Validate and stage authorized datasets before production import.",
             "Manage local data and backups.",
         ]
         self.page_description.setText(descriptions[page_index])
@@ -1586,7 +1651,7 @@ class MainWindow(QMainWindow):
         self.coverage_summary.setText(
             f"Real rows: {int(summary['real_rows'] or 0):,} · Synthetic rows: {int(summary['demo_rows'] or 0):,} · "
             f"Real data range: {summary['earliest_real'] or '—'} to {summary['latest_real'] or '—'}. "
-            "Imported source rights are UNVERIFIED unless independently reviewed. "
+            "Rights evidence is recorded for explicitly reviewed imports; legal validity is not independently verified. "
             "Research staging is RESEARCH ONLY and is not queried or imported here. "
             "Missing dates are candidates, not zero activity; observed dates do not prove archive completeness."
         )
@@ -1606,7 +1671,15 @@ class MainWindow(QMainWindow):
                 f"{int(source['album_mapped_track_ids'] or 0):,}/{track_count:,}",
                 source["earliest"] or "—",
                 source["latest"] or "—",
-                "N/A (synthetic)" if is_demo else "UNVERIFIED",
+                (
+                    "N/A (synthetic)"
+                    if is_demo
+                    else (
+                        "APPROVED — evidence recorded"
+                        if source["rights_approved"]
+                        else "UNVERIFIED"
+                    )
+                ),
                 "DEMO" if is_demo else "IMPORTED",
                 source["source_license"] or "Not recorded",
             ]
@@ -1670,47 +1743,24 @@ class MainWindow(QMainWindow):
                 f"No gaps between observed {self.active_chart_type} dates, or there are not enough real observations to infer gaps."
             )
 
-    def import_file(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Import user-supplied chart data", self._last_directory("last_import_directory"),
-            "Chart files (*.csv *.xlsx);;CSV files (*.csv);;Excel workbooks (*.xlsx)"
-        )
-        if not file_path:
+    def open_import_dialog(self, _checked: bool = False) -> None:
+        if self._import_thread is not None:
+            QMessageBox.information(self, "Import in progress", "Wait for the current import to finish before starting another.")
             return
-        self._remember_directory("last_import_directory", file_path)
-        path = Path(file_path)
-        try:
-            self._start_import_worker(
-                kind="chart",
-                path=str(path),
-                source_name=path.stem,
-                source_license="User-supplied data. Rights must be confirmed before commercial use.",
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Import failed", f"The file could not be imported:\n{exc}")
+        dialog = ImportDialog(self.db.db_path, self._import_staging_path, parent=self)
+        dialog.exec()
+        if dialog.imported:
+            self._update_date_bounds()
+            self.refresh_dashboard()
+
+    def import_file(self) -> None:
+        self.open_import_dialog()
 
     def import_metadata(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Import user-supplied artist / album metadata", self._last_directory("last_import_directory"),
-            "Metadata files (*.csv *.xlsx);;CSV files (*.csv);;Excel workbooks (*.xlsx)"
-        )
-        if not file_path:
-            return
-        self._remember_directory("last_import_directory", file_path)
-        try:
-            dialog = MetadataImportDialog(file_path, self)
-        except Exception as exc:
-            QMessageBox.critical(self, "Metadata preview failed", str(exc))
-            return
-        if dialog.exec() != QDialog.Accepted:
-            return
-        source_name, source_license = dialog.source_details()
-        self._start_import_worker(
-            kind="metadata",
-            path=file_path,
-            source_name=source_name,
-            source_license=source_license,
-            column_mapping=dialog.column_mapping(),
+        QMessageBox.information(
+            self,
+            "Metadata import unavailable",
+            "Include explicit artist/album IDs and names in the dataset, then use Import Dataset.",
         )
 
     def _start_import_worker(

@@ -15,31 +15,23 @@ performance. The generated data has a deliberately repetitive date range and
 artist distribution, with unique track IDs. Do not extrapolate it directly to
 all authorized datasets.
 
-## Latest Phase 8 measurements
+## Latest Phase 8B full-suite measurements
 
 | Rows | Generation + insert (s) | Python peak (MiB) | Process RSS peak (MiB) | Summary (ms) | Songs (ms) | Artists (ms) | DB size (MiB) |
 |---:|---:|---:|---:|---:|---:|---:|---:|
-| 25,000 | 3.186 | 4.76 | 61.27 | 61.76 | 71.25 | 55.29 | 18.67 |
-| 100,000 | 27.152 | 4.81 | 62.75 | 377.54 | 495.92 | 316.75 | 75.48 |
-| 500,000 | 187.436 | 5.16 | 64.38 | 8,956.98 | 2,701.96 | 6,397.45 | 370.27 |
+| 25,000 | 3.095 | 4.76 | 226.28 | 34.40 | 66.78 | 37.40 | 18.68 |
+| 100,000 | 24.196 | 4.80 | 229.66 | 283.31 | 269.73 | 173.83 | 75.49 |
+| 500,000 | 112.912 | 5.00 | 228.18 | 5,083.78 | 1,951.11 | 4,030.18 | 370.28 |
 
-The latest 500k figures compared with the Phase 7 baseline:
-
-| Measurement | Phase 7 baseline | Latest Phase 8 | Change |
-|---|---:|---:|---:|
-| Generation + insert | 148.383 s | 187.436 s | 26.3% slower |
-| Summary query | 12,105 ms | 8,957 ms | 26.0% faster |
-| Top songs | 8,614 ms | 2,702 ms | 68.6% faster |
-| Top artists | 11,273 ms | 6,397 ms | 43.2% faster |
-| Python allocation peak | 4.76 MiB | 5.16 MiB | +0.40 MiB |
-| Database size | 302.04 MiB | 370.27 MiB | 22.6% larger |
-| Process RSS peak | Not measured | 64.38 MiB | Baseline unavailable |
-
-The 500k summary and artist queries remain well above the aspirational 1,000 ms
-and 2,000 ms targets, respectively; songs also exceeds the 2,000 ms target.
-The added index improves query latency at a real storage and insertion cost.
-No performance target should be considered met solely from these synthetic
-measurements.
+These measurements were printed during a full pytest process. Its process RSS
+includes imported test/UI modules and is not comparable with an isolated
+benchmark's RSS. Earlier full-suite runs on this worktree also produced
+different 500k timings, so these are reported observations rather than a
+controlled before/after claim. The 500k summary and artist queries remain well
+above the aspirational 1,000 ms and 2,000 ms targets, respectively. Songs was
+1,951 ms in this run, which is not sufficient evidence to declare the 2,000 ms
+target met. No performance target should be considered met solely from these
+synthetic measurements.
 
 ## Query-plan evidence
 

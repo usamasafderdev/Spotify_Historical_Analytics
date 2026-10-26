@@ -1,0 +1,36 @@
+{
+  "platform": "windows",
+  "scale": 1.5,
+  "size": [
+    840,
+    680
+  ],
+  "captures": [
+    "01-empty-dialog.png",
+    "02-invalid-file.png",
+    "03-browse-files.png",
+    "04-preview-and-coverage.png",
+    "05-import-progress.png",
+    "06-import-result.png",
+    "07-result-bottom.png",
+    "08-optional-mapping.png",
+    "09-mapping-validated.png",
+    "10-import-error.png",
+    "dashboard-01.png",
+    "dashboard-02.png",
+    "dashboard-03.png",
+    "dashboard-04.png",
+    "dashboard-05.png",
+    "dashboard-06.png",
+    "dashboard-07.png"
+  ],
+  "processed": 4,
+  "valid_usa": 2,
+  "rejected": 2,
+  "imported": 1,
+  "duplicates_skipped": 1,
+  "integrity": "ok",
+  "cancelled_safely": true,
+  "changed_source_blocked": true,
+  "manifest_required": false
+}

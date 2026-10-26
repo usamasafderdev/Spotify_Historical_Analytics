@@ -62,11 +62,11 @@ Install a newer per-user build over the existing application to update it. The d
 - Source inventory, annual observation counts, missing-date inspection, and local database backup.
 - Data Sources & Coverage reports observed rows, valid stream counts, unique track IDs, exact artist/album mapping coverage, rights status, and import status for 2017–2026. Research staging is explicitly separate and is not queried by the application.
 - CSV/XLSX exports for filtered Top Songs, Top Artists, and Top Albums rankings. Excel files contain separate Rankings, Definitions, and Coverage & Sources sheets.
-- CSV and XLSX import with validation and duplicate reporting.
-- Background CSV/XLSX and metadata imports, progress stages, metadata column mapping/preview, source provenance, and transaction rollback on failures.
+- One **Import Dataset** dialog for CSV, XLSX, and supported CSV.GZ tables: automatic schema detection, coverage and USA record preview, validation warnings, progress, safe cancellation, backups, duplicate prevention, transactional writes, and SQLite integrity checks. MGD+ and Dhruvil chart schemas are recognized automatically; unknown columns can be mapped inside the same dialog. No JSON permission file or multi-page wizard is required.
+- Artist/album associations are accepted only from explicitly supplied stable IDs and names in a validated chart-data import. The separate legacy metadata-only control stays disabled; use the optional chart/metadata mappings in Import Dataset.
 - Background dashboard search and song/artist/album detail queries; stale responses are discarded after newer filters.
 - Synthetic demo preview uses a temporary, isolated fixture database with multi-year daily/weekly observations, intentionally missing dates, collaborations, and labeled synthetic metadata. Returning to real data does not modify the production database.
-- On a first run with no approved chart records, Overview shows “No historical chart data is loaded yet.” with actions to import an authorized dataset, preview the synthetic dashboard, or inspect data sources. Empty production data is shown as an explicit empty state rather than zero-valued KPIs.
+- On a first run with no imported chart records, Overview shows “No historical chart data is loaded yet.” with actions to import a dataset, preview the synthetic dashboard, or inspect data sources. Empty production data is shown as an explicit empty state rather than zero-valued KPIs.
 
 For an automated widget-level demo launch check, use `--demo-smoke-test`. This opens the same isolated synthetic dashboard and exits with a non-zero code if the KPI cards, song/artist/album tables, or charts do not populate. Set `SPOTIFY_ANALYTICS_DATA_DIR` to a disposable folder when running this check so it does not touch the regular per-user database.
 
@@ -77,6 +77,14 @@ The initial date window begins at the earliest imported date when data exists, o
 Exports use the current USA chart type, inclusive date range, search, and Top 50/100/200 selection. CSV exports include report metadata and source-coverage sections before the rankings section. XLSX exports include dedicated rankings, definitions, and source-coverage worksheets. Only the selected top-N rows are exported.
 
 **Commercial-use caution:** Spotify's Developer Policy and Developer Terms restrict certain analysis and commercial uses of Spotify Content or the Spotify Platform. User-supplied files do not automatically confer rights to use, analyze, or redistribute their contents. Review [docs/DATA_ACQUISITION_STATUS.md](docs/DATA_ACQUISITION_STATUS.md) before commercial use. This application is not affiliated with or endorsed by Spotify.
+
+## Importing local files
+
+Click **Import Dataset ? Browse Files**, select a CSV, XLSX, or CSV.GZ file, and review its source name, cadence, valid USA records, date coverage, and warnings. Then click **Import Dataset**. Compatible schemas map automatically. For an unknown schema, expand **Show column mapping (optional)**, map the five required fields, and click **Validate Mapping**. Daily and weekly records remain separate; missing weekly boundaries are rejected. A backup is saved before production writes.
+
+Only explicitly selected files are imported. Source terms still apply, and local import does not grant commercial or redistribution rights. Existing research staging databases are never automatically promoted or bundled. There is no standalone Zenodo weekly adapter; compatible weekly tables require explicit date boundaries.
+
+Implementation details, tests, and rendered evidence: [docs/SIMPLE_IMPORT_INTERFACE.md](docs/SIMPLE_IMPORT_INTERFACE.md).
 
 ## Tests
 
@@ -103,7 +111,8 @@ Phase 6B adds a separate, checksum-reconciled compact staging workflow and an in
 
 Phase 7 adds read-only chunked adapters in `spotify_historical_analytics.source_adapters` for the verified MGD+ TSV and Dhruvil CSV schemas. It also records the rights scopes and evidence digest required by the research staging approval gate. These adapters do not import data. See [docs/PHASE_7_IMPLEMENTATION.md](docs/PHASE_7_IMPLEMENTATION.md), [docs/DATA_IMPORT_ACCEPTANCE.md](docs/DATA_IMPORT_ACCEPTANCE.md), [docs/ARTIST_MAPPING_VALIDATION.md](docs/ARTIST_MAPPING_VALIDATION.md), and [docs/HISTORICAL_DATA_GAPS.md](docs/HISTORICAL_DATA_GAPS.md). Rights remain unverified; this phase does not indicate production or client delivery readiness.
 
-Phase 8 optimized repeated summary scanning, added a partial covering analytics index, removed redundant distinct-primary-key counts, and expanded synthetic detail-dialog/query-plan tests. The current Windows x64 EXE was rebuilt and passed packaged startup, persistence, integrity, and export smoke checks; no research datasets are bundled. Inno Setup is unavailable, so no installer was produced. Performance targets at 500,000 rows remain unmet, the requested persisted 13-stage import wizard is not complete, and client delivery is not approved. See [docs/PHASE_8_IMPLEMENTATION.md](docs/PHASE_8_IMPLEMENTATION.md), [docs/PERFORMANCE_BEFORE_AFTER.md](docs/PERFORMANCE_BEFORE_AFTER.md), [docs/GUI_AGENT_INSPECTION.md](docs/GUI_AGENT_INSPECTION.md), [docs/IMPORT_WIZARD_QA.md](docs/IMPORT_WIZARD_QA.md), and the existing [docs/RELEASE_QA_CHECKLIST.md](docs/RELEASE_QA_CHECKLIST.md).
+Phase 8 optimized repeated summary scanning and expanded query-plan tests. The later 13-stage wizard has been replaced by the single local-file import dialog documented in [docs/SIMPLE_IMPORT_INTERFACE.md](docs/SIMPLE_IMPORT_INTERFACE.md). Source permissions and research-data redistribution are not inferred from a successful local import. Native desktop/DPI review, signing, installer availability, and performance limitations remain separately documented in the release and performance checklists.
+
 
 See [docs/PHASE_2_IMPLEMENTATION.md](docs/PHASE_2_IMPLEMENTATION.md) for behavior and limitations.
 For accepted metadata columns and identity rules, see [docs/METADATA_IMPORT_GUIDE.md](docs/METADATA_IMPORT_GUIDE.md).
