@@ -52,8 +52,8 @@ def main() -> int:
         return 1
 
     try:
-        smoke_test = "--smoke-test" in sys.argv
         demo_smoke_test = "--demo-smoke-test" in sys.argv
+        smoke_test = "--smoke-test" in sys.argv or demo_smoke_test
         if not smoke_test and not DB_PATH.exists():
             legacy_path = next(
                 (path for path in legacy_database_candidates() if path.is_file()),

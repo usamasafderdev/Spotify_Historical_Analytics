@@ -214,3 +214,66 @@ def test_demo_mode_uses_separate_database_and_returns_to_production(tmp_path: Pa
     assert db.get_summary(chart_type="daily")["total_streams"] == production_total
     window.close()
     db.close()
+
+
+def test_first_run_empty_state_and_demo_preview_widgets(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    db = DatabaseManager(tmp_path / "empty-production.db")
+    window = MainWindow(db=db)
+    window.show()
+    wait_for_dashboard(window)
+
+    assert window._demo_mode is False
+    assert window.active_chart_type == "daily"
+    assert window.active_start is None
+    assert window.active_end is None
+    assert window.start_edit.date().toPython().isoformat() == "2017-01-01"
+    assert window.end_edit.date().toPython() == date.today()
+    assert window.overview_empty.text() == "No historical chart data is loaded yet."
+    assert window.overview_empty.isVisible()
+    assert window.overview_empty_actions.isVisible()
+    assert window.empty_import_button.text() == "Import Authorized Dataset"
+    assert window.empty_demo_button.text() == "Preview Demo Dashboard"
+    assert window.empty_sources_button.text() == "View Data Sources"
+    assert not window.overview_data.isVisible()
+    assert all(widget.value.text() == "—" for widget in window.kpis)
+
+    window.empty_sources_button.click()
+    assert window.pages.currentIndex() == 4
+    window.navigate(0)
+
+    old_generation = window._dashboard_generation
+    window.empty_demo_button.click()
+    wait_for_new_dashboard(window, old_generation)
+    assert window._demo_mode
+    assert window.demo_banner.isVisible()
+    assert "DEMO / SYNTHETIC DATA" in window.demo_banner.text()
+    assert window.overview_data.isVisible()
+    assert not window.overview_empty.isVisible()
+    assert int(window.kpis[0].value.text().replace(",", "")) > 0
+    assert window.songs_table.rowCount() > 0
+    assert window.artist_table.rowCount() > 0
+    assert window.album_table.rowCount() > 0
+    assert window.streams_chart.plot.listDataItems()
+    assert window.top_songs_chart.plot.listDataItems()
+
+    old_generation = window._dashboard_generation
+    window.chart_type_combo.setCurrentIndex(window.chart_type_combo.findData("weekly"))
+    wait_for_new_dashboard(window, old_generation)
+    assert window.active_chart_type == "weekly"
+    assert window.songs_table.rowCount() > 0
+    assert window.artist_table.rowCount() > 0
+    assert window.album_table.rowCount() > 0
+
+    old_generation = window._dashboard_generation
+    window.load_demo_data()
+    wait_for_new_dashboard(window, old_generation)
+    assert not window._demo_mode
+    assert not window.demo_banner.isVisible()
+    assert window.db is db
+    assert db.connection.execute("SELECT COUNT(*) FROM chart_records").fetchone()[0] == 0
+    assert window.overview_empty.isVisible()
+    assert not window.overview_data.isVisible()
+
+    window.close()
+    db.close()

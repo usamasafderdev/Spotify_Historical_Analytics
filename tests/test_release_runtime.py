@@ -33,6 +33,20 @@ def test_windows_user_data_root_and_override(monkeypatch: pytest.MonkeyPatch, tm
     assert config._application_root() == override
 
 
+def test_frozen_app_data_root_uses_local_app_data_not_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    user_data = tmp_path / "Local AppData"
+    bundle_data = tmp_path / "PyInstaller bundle"
+    monkeypatch.setenv("LOCALAPPDATA", str(user_data))
+    monkeypatch.delenv("SPOTIFY_ANALYTICS_DATA_DIR", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(bundle_data), raising=False)
+
+    assert config._application_root() == user_data / "USMusicChartsAnalytics"
+    assert config._application_root() != bundle_data
+
+
 def test_settings_persist_recent_paths_atomically(tmp_path: Path) -> None:
     settings_path = tmp_path / "config" / "settings.json"
     settings = SettingsStore(settings_path)

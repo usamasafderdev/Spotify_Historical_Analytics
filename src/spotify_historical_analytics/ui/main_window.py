@@ -466,7 +466,7 @@ class MainWindow(QMainWindow):
         filter_layout.setColumnStretch(5, 1)
         content_layout.addWidget(filters)
 
-        self.demo_banner = QLabel("DEMO / SYNTHETIC observations exist. They are excluded from all real-data metrics and charts.")
+        self.demo_banner = QLabel("DEMO / SYNTHETIC DATA is isolated and excluded from all real-data metrics and charts.")
         self.demo_banner.setStyleSheet("background:#382B1E; color:#F7D8A1; padding:10px 12px; border:1px solid #71532C; border-radius:8px;")
         self.demo_banner.setVisible(False)
         content_layout.addWidget(self.demo_banner)
@@ -999,13 +999,20 @@ class MainWindow(QMainWindow):
         overview = payload["overview"]
         inventory = payload["inventory"]
         summary = overview["summary"]
-        values = [
-            f"{summary['total_streams']:,}",
-            f"{summary['distinct_tracks']:,}",
-            f"{summary['distinct_artists']:,}",
-            f"{summary['chart_dates_with_data']:,}",
-            f"{summary['coverage_percentage']:.1f}%",
-        ]
+        real_rows = int(inventory["summary"]["real_rows"] or 0)
+        demo_rows = int(inventory["summary"]["demo_rows"] or 0)
+        has_active_data = demo_rows > 0 if self._demo_mode else real_rows > 0
+        values = (
+            [
+                f"{summary['total_streams']:,}",
+                f"{summary['distinct_tracks']:,}",
+                f"{summary['distinct_artists']:,}",
+                f"{summary['chart_dates_with_data']:,}",
+                f"{summary['coverage_percentage']:.1f}%",
+            ]
+            if has_active_data
+            else ["—"] * len(self.kpis)
+        )
         for widget, value in zip(self.kpis, values):
             widget.value.setText(value)
         self.kpis[4].subtitle.setText(
@@ -1013,20 +1020,17 @@ class MainWindow(QMainWindow):
             else "Observed weekly anchors / expected weekly intervals"
         )
         self.kpis[4].value.setToolTip("Descriptive observation coverage only; it does not verify that the source dataset is complete.")
-        real_rows = int(inventory["summary"]["real_rows"] or 0)
-        demo_rows = int(inventory["summary"]["demo_rows"] or 0)
         self.data_status.setText(f"{real_rows:,} real rows · {demo_rows:,} demo rows")
         if self._demo_mode:
             self.demo_banner.setText(
-                "DEMO / SYNTHETIC MODE — isolated generated test records only. No production observations are shown."
+                "DEMO / SYNTHETIC DATA — isolated generated test records only. No production observations are shown."
             )
             self.demo_banner.setVisible(True)
         else:
             self.demo_banner.setText(
-                "DEMO / SYNTHETIC observations exist in the isolated demo fixture and are excluded from real-data metrics."
+                "DEMO / SYNTHETIC DATA exists in the isolated demo fixture and is excluded from real-data metrics."
             )
             self.demo_banner.setVisible(demo_rows > 0)
-        has_active_data = demo_rows > 0 if self._demo_mode else real_rows > 0
         self.overview_data.setVisible(has_active_data)
         self.overview_empty.setVisible(not has_active_data)
         self.overview_empty_actions.setVisible(not has_active_data)

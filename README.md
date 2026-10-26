@@ -65,6 +65,9 @@ Install a newer per-user build over the existing application to update it. The d
 - Background CSV/XLSX and metadata imports, progress stages, metadata column mapping/preview, source provenance, and transaction rollback on failures.
 - Background dashboard search and song/artist/album detail queries; stale responses are discarded after newer filters.
 - Synthetic demo preview uses a temporary, isolated fixture database with multi-year daily/weekly observations, intentionally missing dates, collaborations, and labeled synthetic metadata. Returning to real data does not modify the production database.
+- On a first run with no approved chart records, Overview shows “No historical chart data is loaded yet.” with actions to import an authorized dataset, preview the synthetic dashboard, or inspect data sources. Empty production data is shown as an explicit empty state rather than zero-valued KPIs.
+
+For an automated widget-level demo launch check, use `--demo-smoke-test`. This opens the same isolated synthetic dashboard and exits with a non-zero code if the KPI cards, song/artist/album tables, or charts do not populate. Set `SPOTIFY_ANALYTICS_DATA_DIR` to a disposable folder when running this check so it does not touch the regular per-user database.
 
 Metadata support is limited to user-supplied data. No restricted Spotify metadata is fetched or scraped. Album totals are labeled **Album charting-track streams** and do not represent comprehensive platform album totals.
 
