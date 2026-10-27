@@ -19,8 +19,10 @@ src/spotify_historical_analytics/services/__init__.py
 src/spotify_historical_analytics/services/analytics.py
 src/spotify_historical_analytics/ui/import_dialog.py
 src/spotify_historical_analytics/ui/main_window.py
+src/spotify_historical_analytics/ui/phase9_qa.py
 src/spotify_historical_analytics/ui/theme.py
 src/spotify_historical_analytics/ui/visual_qa.py
+src/spotify_historical_analytics/ui/windows_capture.py
 src/spotify_historical_analytics/ui/workers.py
 src/us_music_charts_analytics.egg-info/PKG-INFO
 src/us_music_charts_analytics.egg-info/SOURCES.txt
@@ -30,13 +32,15 @@ src/us_music_charts_analytics.egg-info/requires.txt
 src/us_music_charts_analytics.egg-info/top_level.txt
 tests/test_exports.py
 tests/test_foundation.py
-tests/test_import_sessions.py
 tests/test_import_dialog.py
+tests/test_import_sessions.py
 tests/test_import_worker.py
 tests/test_performance.py
 tests/test_phase3_metadata.py
 tests/test_phase3_ui.py
 tests/test_phase6_research_pipeline.py
+tests/test_phase9_correctness.py
+tests/test_phase9_edges.py
 tests/test_release_runtime.py
 tests/test_source_adapters.py
 tests/test_ui_smoke.py
