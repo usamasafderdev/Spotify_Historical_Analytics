@@ -1,6 +1,6 @@
 # Supported historical data schema
 
-US Music Charts Analytics 0.1.0. Data import runs inside the Windows application; Python and VS Code are not required. This document describes the local-file importer, not the separate research pipeline.
+US Music Charts Analytics 0.1.8 development source. Historical dataset integration and packaged verification are pending. This document describes the local-file importer, not the separate research pipeline.
 
 ## Files and required columns
 
@@ -26,9 +26,13 @@ Dates also recognize `YYYY/MM/DD`, `MM/DD/YYYY`, and `DD/MM/YYYY`, but ambiguous
 | `url` | Optional supported track URL/URI from which a stable ID can be extracted. Stored as text; no track is fetched. |
 | `position` | Positive integer chart rank when supplied. Recognized source adapters require it. |
 | `chart_type` | `daily` or `weekly`; otherwise choose the cadence in the dialog. A mixed file imports only the selected cadence. |
-| `weekly_start`, `weekly_end` | Both required for weekly imports, with start on or before end. Supply the actual source reporting interval; the app does not reconstruct daily counts. |
+| `weekly_start`, `weekly_end` | Both required for weekly imports: seven inclusive calendar days, with the observation date inside that interval. Supply the actual source reporting interval; the app does not reconstruct daily counts. |
 
 Daily and weekly totals are separate. The app sums the imported chart count as supplied; it does not divide weekly totals into days, manufacture absent observations, or treat sampled weekly dates as complete daily history. Source-specific recognized adapters impose additional category/ID checks and reject streamless Viral rows.
+
+The **Weekly (from daily)** view computes Monday-Sunday periods from existing daily observations, reports each on Sunday, and filters by that reporting date. Partial weeks remain partial: missing observations are never filled. This view does not write derived rows into SQLite or combine them with source weekly observations. Song tooltips include the number of observed days.
+
+**Import Weekly CSV** accepts one or multiple CSV, CSV.GZ, or XLSX files with the required fields above, explicit week boundaries, and a valid 22-character Spotify track ID (or a supported track URL). Chart position is a positive integer when supplied. Files are validated in full; any invalid row or conflicting observation blocks that file. Each file commits transactionally; other selected files can succeed, and the result summary reports each outcome. No automatic full-database copies are made by this weekly workflow.
 
 ## Artist and album relationships
 
@@ -36,13 +40,17 @@ For stable artist attribution supply `track_id`, `artist_id`, and `mapped_artist
 
 For collaborations, repeat an otherwise identical chart observation with a different supplied artist ID/resolved name per collaborator. Keep its title, whole credit string, date, position, and streams identical. The observation is imported once while distinct supplied relationships are retained. Each mapped artist receives full credit; artist totals can overlap.
 
-For albums supply `track_id`, `album_id`, and `album_name`. Optional `album_artist`, `release_date`, and `source_reference` improve labels/provenance. An album ID without its name rejects the row. Distinct album IDs remain separate editions, even when their names match. Association-only files are not a separate client import flow; provide associations alongside chart observations. Avoid title-only fallback identities for accurate cross-source album work.
+For albums supply `track_id`, `album_id`, and `album_name`. Optional `album_artist`, `release_date`, and `source_reference` improve labels/provenance. An album ID without its name rejects the row. Distinct album IDs remain separate editions, even when their names match. Associations may accompany observations or be imported separately with **Settings > Import artist / album metadata**. Avoid title-only fallback identities for accurate cross-source album work.
 
 These are user-supplied exact associations, not independently authenticated platform metadata. Conflicting names or album metadata for an existing ID can block the transaction. Without stable mappings, album rankings stay empty.
 
 ## Validation and coverage
 
-Review source name, detected cadence, date range, valid USA counts, rejections, duplicate counts, and warnings before importing. The dialog shows actual observed coverage, not a completeness certification. Existing source/track/date identities with conflicting values block import. Duplicates are prevented within the source context; different overlapping sources are not automatically reconciled into a canonical history. Use a consistent source name on repeat imports.
+Review source name, detected cadence, date range, valid USA counts, rejections, duplicate counts, and warnings before importing. The dialog shows actual observed coverage, not a completeness certification. Existing track/date/chart-type identities with conflicting values block import across production sources. Exact overlapping observations are skipped. Analytics count each identity once even if duplicate records already exist, using the earliest stored record; legacy conflicts must be reviewed before genuine dataset integration. Demo observations remain separate.
+
+Repeat indicators count distinct reporting dates per stable song/artist/album identity across the full selected range and chart type, before Top N. Multiple charting tracks on the same date count as one artist/album appearance. Unresolved credit strings are labeled without asserting repeat artist identity. Rankings already have one row per entity, so **Hide Repeats** preserves all rows, rankings, and stream totals. It never filters out an entity because its appearance count exceeds one.
+
+SQLite schema version 2 remains compatible: observations live in `chart_records`; stable entities and exact mappings use `tracks`, `artists`, `albums`, `track_artists`, and `track_albums`. Later seed integration must merge through validated imports into the user database, never replace it. **Settings** provides user-requested backups and restore; restore checks integrity/schema and saves the previous database first.
 
 Validation stages rows in chunks of 2,000; final production changes are transactional. File hashes detect changes between validation and import. Cancellation rolls back a production transaction. A pre-import backup is created, so allow additional disk space for the input, staging database, production growth, and backups. Very large imports can take minutes. No fixed maximum row count or silently truncated preview is an import limit. Very large aggregate totals remain subject to SQLite numeric limits and spreadsheet numeric precision.
 

@@ -2,7 +2,7 @@
 
 An independent local Windows desktop application for analyzing user-supplied US music chart CSV/XLSX observations. Metrics are derived only from imported rows; they are not official platform totals and do not imply complete historical coverage. The application is not affiliated with or endorsed by Spotify.
 
-Current acceptance: [Phase 10 release acceptance](docs/PHASE_10_RELEASE_ACCEPTANCE.md), [handover checklist](docs/FINAL_CLIENT_HANDOVER_CHECKLIST.md), and [supported data schema](docs/SUPPORTED_DATA_SCHEMA.md). The frozen 0.1.0 installer and local review package are prepared; final client delivery remains blocked by data, clean-machine, human desktop and redistribution acceptance. Earlier engineering evidence remains in [Phase 9 QA](docs/PHASE_9_ENGINEERING_QA.md). Client instructions: [user guide](docs/USER_GUIDE.md).
+Current source: **0.1.8 feature restoration** on `recovery/v018-feature-restoration`. Historical dataset integration and packaged verification remain pending; no new executable, installer, or client ZIP is produced. See the [supported data schema](docs/SUPPORTED_DATA_SCHEMA.md). Earlier release acceptance and handover documents describe the previous source and are retained as historical references.
 
 ## Setup
 
@@ -56,7 +56,7 @@ Install a newer per-user build over the existing application to update it. The d
 
 ## Dashboard
 
-- Overview KPIs and interactive PyQtGraph charts for real imported daily or weekly observations.
+- Overview KPIs include chart streams, songs, stable-ID artists (with explicit unresolved-credit fallback), mapped albums, reporting dates, and coverage. Daily, original weekly, and daily-derived weekly views remain separate.
 - Shared chart-type and inclusive date filters, with last 7/30/90 days and last-year presets.
 - Top Songs rankings with search, sorting, top 50/100/200 selection, and a double-click detail view.
 - Top Artists rankings with full-credit stable-ID attribution, exact-string fallback, search, details, and a trend chart.
@@ -65,7 +65,10 @@ Install a newer per-user build over the existing application to update it. The d
 - Data Sources & Coverage reports observed rows, valid stream counts, unique track IDs, exact artist/album mapping coverage, rights status, and import status for 2017–2026. Research staging is explicitly separate and is not queried by the application.
 - CSV/XLSX exports for filtered Top Songs, Top Artists, and Top Albums rankings. Excel files contain separate Rankings, Definitions, and Coverage & Sources sheets.
 - One **Import Dataset** dialog for CSV, XLSX, and supported CSV.GZ tables: automatic schema detection, coverage and USA record preview, validation warnings, progress, safe cancellation, backups, duplicate prevention, transactional writes, and SQLite integrity checks. MGD+ and Dhruvil chart schemas are recognized automatically; unknown columns can be mapped inside the same dialog. No JSON permission file or multi-page wizard is required.
-- Artist/album associations are accepted only from explicitly supplied stable IDs and names in a validated chart-data import. The separate legacy metadata-only control stays disabled; use the optional chart/metadata mappings in Import Dataset.
+- **Import Weekly CSV** accepts one or multiple CSV/CSV.GZ/XLSX files, validates explicit seven-day periods, US region, Spotify track IDs and stream counts, and reports imports, duplicates, and conflicts per file. Each file commits transactionally and immediately refreshes analytics and date bounds.
+- Artist/album associations use explicitly supplied stable IDs and names, either alongside observations or through **Settings > Import artist / album metadata**.
+- Song, artist, and album repeat indicators count distinct reporting dates across the full filtered history. **Hide Repeats** preserves these already aggregated one-row-per-entity rankings and all stream totals.
+- Historical stream graphs start at zero, label actual observation dates, preserve gaps, and show period details on hover. Settings includes validated SQLite restore with a safety backup.
 - Background dashboard search and song/artist/album detail queries; stale responses are discarded after newer filters.
 - Synthetic demo preview uses a temporary, isolated fixture database with multi-year daily/weekly observations, intentionally missing dates, collaborations, and labeled synthetic metadata. Returning to real data does not modify the production database.
 - On a first run with no imported chart records, Overview shows “No historical chart data is loaded yet.” with actions to import a dataset, preview the synthetic dashboard, or inspect data sources. Empty production data is shown as an explicit empty state rather than zero-valued KPIs.

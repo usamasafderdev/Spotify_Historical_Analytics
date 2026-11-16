@@ -137,7 +137,7 @@ def test_artist_full_credit_album_mappings_and_date_filtering(tmp_path: Path) ->
     album = db.get_album_detail(ALBUM_ONE, chart_type="daily")
     assert album is not None
     assert album["mapped_track_count"] == 2
-    assert album["chart_appearances"] == 3
+    assert album["chart_appearances"] == 2
     assert [track["track_id"] for track in db.get_album_tracks(ALBUM_ONE, chart_type="daily")] == [TRACK_B, TRACK_A]
 
     artists = db.get_artist_summary(chart_type="daily", limit=50)
