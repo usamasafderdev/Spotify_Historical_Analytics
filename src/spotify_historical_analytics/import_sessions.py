@@ -16,10 +16,11 @@ from typing import Callable, Iterator
 from openpyxl import load_workbook
 
 from .db import DatabaseManager
+from .weekly_formats import spotify_weekly_context
 
 
 IMPORT_SESSION_SCHEMA = 2
-IMPORT_ADAPTER_VERSION = 3
+IMPORT_ADAPTER_VERSION = 4
 CHUNK_SIZE = 2_000
 MAX_REJECTION_SAMPLES = 100
 FIELD_ALIASES = {
@@ -322,8 +323,11 @@ class ImportSessionStore:
         if path.name.casefold().endswith((".csv", ".csv.gz")):
             opener = gzip.open if path.name.casefold().endswith(".gz") else open
             source = opener(path, "rt", encoding="utf-8-sig", newline="")
+            first_line = source.readline()
+            header_offset = source.tell() if first_line.lstrip('"').startswith("Note that these figures") else 0
+            source.seek(header_offset)
             sample = source.read(16384)
-            source.seek(0)
+            source.seek(header_offset)
             try:
                 dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
             except csv.Error:
@@ -332,14 +336,20 @@ class ImportSessionStore:
             if reader.fieldnames is None:
                 source.close()
                 raise ValueError("The CSV file has no header row.")
+            try:
+                context = spotify_weekly_context(path, list(reader.fieldnames))
+            except Exception:
+                source.close()
+                raise
 
             def rows() -> Iterator[dict[str, object]]:
                 try:
-                    yield from reader
+                    for row in reader:
+                        yield {**row, **context}
                 finally:
                     source.close()
 
-            yield [str(name) for name in reader.fieldnames], rows()
+            yield [str(name) for name in reader.fieldnames] + list(context), rows()
             return
 
         workbook = load_workbook(path, read_only=True, data_only=True)
@@ -350,19 +360,18 @@ class ImportSessionStore:
             if header_values is None:
                 raise ValueError("The XLSX worksheet is empty.")
             headers = [str(value).strip() if value is not None else "" for value in header_values]
+            context = spotify_weekly_context(path, headers)
 
             def rows() -> Iterator[dict[str, object]]:
                 try:
                     for row in values:
-                        yield {
-                            header: value
-                            for header, value in zip(headers, row)
-                            if header
-                        }
+                        yield {**{
+                            header: value for header, value in zip(headers, row) if header
+                        }, **context}
                 finally:
                     workbook.close()
 
-            yield headers, rows()
+            yield headers + list(context), rows()
         except Exception:
             workbook.close()
             raise
@@ -377,11 +386,19 @@ class ImportSessionStore:
         }
         if self.detect_adapter(headers) == "MGD+":
             resolved.update(track_id="ID", country="market")
+        for field, column in {
+            "date": "_spotify_date", "country": "_spotify_country", "chart_type": "_spotify_chart_type",
+            "weekly_start": "_spotify_week_start", "weekly_end": "_spotify_week_end",
+        }.items():
+            if column in headers:
+                resolved.setdefault(field, column)
         return resolved
 
     @staticmethod
     def detect_adapter(headers: list[str]) -> str:
         from .source_adapters import MGDPLUS_CHART_COLUMNS, DHRUVIL_COLUMNS
+        if "_spotify_week_start" in headers:
+            return "Spotify weekly CSV"
         if set(MGDPLUS_CHART_COLUMNS).issubset(headers):
             return "MGD+"
         if set(DHRUVIL_COLUMNS).issubset(headers):
@@ -682,12 +699,12 @@ class ImportSessionStore:
             return None, "invalid_streams"
         adapter = ImportSessionStore.detect_adapter(list(raw))
         chart_value = _as_text(field("chart_type"))
-        if adapter != "Compatible table":
+        if adapter in {"MGD+", "Dhruvil Spotify Charts"}:
             if not chart_value:
                 return None, "missing_chart_category"
             if "viral" in chart_value.casefold():
                 return None, "streamless_viral_chart"
-            chart_value = "daily"
+            chart_value = chart_value.lower() if chart_value.lower() in {"daily", "weekly"} else "daily"
         chart_type = (
             DatabaseManager.normalize_chart_type(chart_value)
             if chart_value
@@ -701,7 +718,8 @@ class ImportSessionStore:
         url = _as_text(field("url"))
         if not raw_track_id and url:
             from .source_adapters import _verified_spotify_track_id
-            raw_track_id = _verified_spotify_track_id(url) or ""
+            uri_match = re.fullmatch(r"spotify:track:([A-Za-z0-9]{22})", url)
+            raw_track_id = uri_match[1] if uri_match else _verified_spotify_track_id(url) or ""
         if adapter != "Compatible table" and not raw_track_id:
             return None, "missing_stable_track_id"
         track_id = raw_track_id or f"{track_name}|{artist_names}"
@@ -710,6 +728,11 @@ class ImportSessionStore:
             return None, "invalid_chart_position"
         weekly_start = _parse_date(field("weekly_start"))
         weekly_end = _parse_date(field("weekly_end"))
+        if adapter == "Spotify weekly CSV" and (
+            country != raw["_spotify_country"] or selected_chart != "weekly"
+            or weekly_start != raw["_spotify_week_start"] or weekly_end != raw["_spotify_week_end"]
+        ):
+            return None, "conflicting_spotify_week_context"
         if selected_chart == "weekly" and (not weekly_start or not weekly_end):
             return None, "missing_week_boundaries"
         if weekly_start and weekly_end and (

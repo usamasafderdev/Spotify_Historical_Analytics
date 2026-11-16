@@ -53,8 +53,8 @@ class ImportTask(QObject):
                 schema = self.options["mapping"] if self.options.get("mapping") is not None else inspection["schema"]
                 observed = {str(row.get(schema.get("chart_type"), "")).strip().lower() for row in sample}
                 explicit = observed & {"daily", "weekly"}
-                detected = "daily" if inspection["adapter"] != "Compatible table" else (
-                    next(iter(explicit)) if len(explicit) == 1 else None
+                detected = next(iter(explicit)) if len(explicit) == 1 else (
+                    "daily" if inspection["adapter"] in {"MGD+", "Dhruvil Spotify Charts"} else None
                 )
                 if not detected and schema.get("weekly_start") and schema.get("weekly_end"):
                     detected = "weekly"

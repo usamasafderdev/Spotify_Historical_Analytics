@@ -50,6 +50,7 @@ from ..resources import resource_path
 from ..settings import SettingsStore
 from .theme import apply_dark_theme
 from .history_chart import render_history
+from .appearance_dialog import AppearanceDialog
 from .import_dialog import ImportDialog
 from .workers import (
     DashboardQueryWorker,
@@ -610,13 +611,28 @@ class MainWindow(QMainWindow):
     def _repeat_control(self, category: str) -> QCheckBox:
         control = QCheckBox("Hide Repeats")
         control.setToolTip(
-            "These rankings already contain one row per entity. Repeat indicators count distinct "
-            "reporting dates across the full filtered history. This option preserves every ranked entity and its totals."
+            "Applies in Chart showings: keep the best showing per stable entity for the selected sort. "
+            "Aggregated rankings already have one row per entity and stay unchanged."
         )
         control.toggled.connect(lambda checked: self.statusBar().showMessage(
-            f"{category}: one row per entity; historical appearances and stream totals are preserved."
+            f"{category}: open Chart showings to view repeat filtering. Aggregated rankings and totals are unchanged."
         ))
         return control
+
+    def _show_chart_showings(self, category: str) -> None:
+        prefix = {"songs": "song", "artists": "artist", "albums": "album"}[category]
+        control = getattr(self, f"{prefix}_hide_repeats")
+        dialog = AppearanceDialog(
+            self.db, category, self._filters(), getattr(self, f"{prefix}_search").text().strip(),
+            int(getattr(self, f"{prefix}_limit").currentData()), control.isChecked(), self._demo_mode, self,
+        )
+        dialog.exec()
+        control.setChecked(dialog.hide_repeats.isChecked())
+
+    def _showings_button(self, category: str) -> QPushButton:
+        button = QPushButton("Chart showings")
+        button.clicked.connect(lambda: self._show_chart_showings(category))
+        return button
 
     def _appearance_item(self, row: dict, stable_identity: bool = True) -> NumericTableItem:
         count = int(row["chart_appearances"])
@@ -644,6 +660,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.song_search, 1)
         self.song_hide_repeats = self._repeat_control("Songs")
         controls.addWidget(self.song_hide_repeats)
+        controls.addWidget(self._showings_button("songs"))
         controls.addWidget(QLabel("SHOW"))
         self.song_limit = QComboBox()
         for limit in (50, 100, 200):
@@ -694,6 +711,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.artist_search, 1)
         self.artist_hide_repeats = self._repeat_control("Artists")
         controls.addWidget(self.artist_hide_repeats)
+        controls.addWidget(self._showings_button("artists"))
         controls.addWidget(QLabel("SHOW"))
         self.artist_limit = QComboBox()
         for limit in (50, 100, 200):
@@ -744,6 +762,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.album_search, 1)
         self.album_hide_repeats = self._repeat_control("Albums")
         controls.addWidget(self.album_hide_repeats)
+        controls.addWidget(self._showings_button("albums"))
         controls.addWidget(QLabel("SHOW"))
         self.album_limit = QComboBox()
         for limit in (50, 100, 200):
