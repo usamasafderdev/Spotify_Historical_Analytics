@@ -2,7 +2,7 @@
 
 An independent local Windows desktop application for analyzing user-supplied US music chart CSV/XLSX observations. Metrics are derived only from imported rows; they are not official platform totals and do not imply complete historical coverage. The application is not affiliated with or endorsed by Spotify.
 
-Current source: **0.1.8 feature restoration** on `recovery/v018-feature-restoration`. Historical dataset integration and packaged verification remain pending; no new executable, installer, or client ZIP is produced. See the [supported data schema](docs/SUPPORTED_DATA_SCHEMA.md). Earlier release acceptance and handover documents describe the previous source and are retained as historical references.
+Current source: **0.1.8 feature restoration** on `recovery/v018-feature-restoration`. [Partial local weekly/metadata integration](docs/LOCAL_DATA_INTEGRATION.md) is available through `scripts/run_integrated.ps1`; complete historical coverage and packaged verification remain pending. No new executable, installer, or client ZIP is produced. See the [supported data schema](docs/SUPPORTED_DATA_SCHEMA.md). Earlier release acceptance and handover documents describe the previous source and are retained as historical references.
 
 ## Setup
 

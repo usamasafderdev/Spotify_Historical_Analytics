@@ -46,6 +46,7 @@ from ..metadata_importer import (
     suggest_metadata_columns,
 )
 from ..services.analytics import AnalyticsService
+from ..services.references import entity_references
 from ..resources import resource_path
 from ..settings import SettingsStore
 from .theme import apply_dark_theme
@@ -1346,6 +1347,16 @@ class MainWindow(QMainWindow):
         outer.addWidget(scroll, 1)
         return layout, outer
 
+    def _add_entity_references(self, layout, kind: str, identifier: str) -> None:
+        for reference in entity_references(self.db, kind, identifier):
+            prefix = "Artwork reference (not downloaded or verified)" if reference["reference_type"] == "artwork" else "Spotify reference"
+            label = QLabel(f"{prefix}: {reference['url']}")
+            label.setTextFormat(Qt.PlainText)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            label.setWordWrap(True)
+            label.setObjectName("muted")
+            layout.addWidget(label)
+
     def _show_song_detail(self, detail: dict, rows: list[dict]) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Song details · {detail['track_name']}")
@@ -1356,6 +1367,7 @@ class MainWindow(QMainWindow):
         artist.setObjectName("muted")
         layout.addWidget(heading)
         layout.addWidget(artist)
+        self._add_entity_references(layout, "track", detail["track_key"])
         metrics = QLabel(
             f"Streams: {int(detail['total_streams']):,}    "
             f"Best position: {detail['best_position'] if detail['best_position'] is not None else 'Unavailable'}    "
@@ -1430,6 +1442,8 @@ class MainWindow(QMainWindow):
         identity.setWordWrap(True)
         layout.addWidget(heading)
         layout.addWidget(identity)
+        if detail["artist_id"]:
+            self._add_entity_references(layout, "artist", detail["artist_id"])
         stream_label = (
             "Full-credit charting-song streams"
             if detail["artist_id"]
@@ -1504,6 +1518,7 @@ class MainWindow(QMainWindow):
         artist.setObjectName("muted")
         layout.addWidget(heading)
         layout.addWidget(artist)
+        self._add_entity_references(layout, "album", detail["album_id"])
         metrics = QLabel(
             f"Album charting-track streams: {int(detail['charting_track_streams']):,}    "
             f"Mapped tracks: {detail['mapped_track_count']}    "

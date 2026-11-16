@@ -1,6 +1,6 @@
 # Supported historical data schema
 
-US Music Charts Analytics 0.1.8 development source. Historical dataset integration and packaged verification are pending. This document describes the local-file importer, not the separate research pipeline.
+US Music Charts Analytics 0.1.8 development source. [Partial local weekly/metadata integration](LOCAL_DATA_INTEGRATION.md) is available in an isolated development database; complete historical coverage and packaged verification remain pending. This document describes the local-file importer, not the separate research pipeline.
 
 ## Files and required columns
 
