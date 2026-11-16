@@ -712,7 +712,10 @@ class ImportSessionStore:
         weekly_end = _parse_date(field("weekly_end"))
         if selected_chart == "weekly" and (not weekly_start or not weekly_end):
             return None, "missing_week_boundaries"
-        if weekly_start and weekly_end and weekly_start > weekly_end:
+        if weekly_start and weekly_end and (
+            (date.fromisoformat(weekly_end) - date.fromisoformat(weekly_start)).days != 6
+            or not weekly_start <= chart_date <= weekly_end
+        ):
             return None, "invalid_week_boundaries"
         release_date_value = field("release_date")
         release_date = _parse_date(release_date_value) if release_date_value else None
@@ -1049,7 +1052,7 @@ class ImportSessionStore:
                     SELECT 1
                     FROM import_stage.staged_chart_rows s
                     JOIN chart_records c
-                      ON c.source=? AND c.country='US' AND c.chart_type=?
+                      ON c.source <> 'DEMO / SYNTHETIC' AND c.country='US' AND c.chart_type=?
                      AND c.chart_date=s.chart_date AND c.track_id=s.track_id
                     WHERE s.session_id=?
                       AND (c.position IS NOT s.position OR c.streams != s.streams
@@ -1059,11 +1062,11 @@ class ImportSessionStore:
                            OR c.weekly_end IS NOT s.weekly_end)
                     LIMIT 1
                     """,
-                    (session["source_name"], session["chart_type"], session_id),
+                    (session["chart_type"], session_id),
                 ).fetchone()
                 if conflict:
                     raise ValueError(
-                        "Import conflicts with an existing production observation from this source. "
+                        "Import conflicts with an existing production observation. "
                         "No production records were committed."
                     )
                 artist_conflict = connection.execute(
@@ -1122,7 +1125,7 @@ class ImportSessionStore:
                         WHERE s.session_id=? AND s.source_row>? AND s.source_row<=?
                           AND NOT EXISTS (
                               SELECT 1 FROM chart_records c
-                              WHERE c.source=? AND c.country='US' AND c.chart_type=?
+                              WHERE c.source <> 'DEMO / SYNTHETIC' AND c.country='US' AND c.chart_type=?
                                 AND c.chart_date=s.chart_date AND c.track_id=s.track_id
                                 AND c.position IS s.position AND c.streams=s.streams
                                 AND c.track_name=s.track_name
@@ -1137,7 +1140,6 @@ class ImportSessionStore:
                             session_id,
                             last_row,
                             upper_row,
-                            session["source_name"],
                             session["chart_type"],
                         ),
                     )

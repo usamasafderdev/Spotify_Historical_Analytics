@@ -10,6 +10,7 @@ from ..db import DatabaseManager
 from ..exports import export_rankings
 from ..importer import import_csv_file, import_xlsx_file
 from ..metadata_importer import import_metadata_file
+from ..weekly_import import import_weekly_files
 from ..runtime import LOGGER
 from ..services.analytics import AnalyticsService
 
@@ -28,6 +29,7 @@ class ImportWorker(QObject):
         source_license: str,
         chart_type: str = "daily",
         column_mapping: dict[str, str] | None = None,
+        file_paths: list[str] | None = None,
     ) -> None:
         super().__init__()
         self.db_path = db_path
@@ -37,6 +39,7 @@ class ImportWorker(QObject):
         self.source_license = source_license
         self.chart_type = chart_type
         self.column_mapping = column_mapping
+        self.file_paths = file_paths or []
 
     @Slot()
     def run(self) -> None:
@@ -44,7 +47,9 @@ class ImportWorker(QObject):
         try:
             self.progress.emit("Opening the local database…")
             db = DatabaseManager(Path(self.db_path))
-            if self.kind == "metadata":
+            if self.kind == "weekly":
+                result = import_weekly_files(db, self.file_paths, self.progress.emit)
+            elif self.kind == "metadata":
                 result = import_metadata_file(
                     db,
                     self.file_path,

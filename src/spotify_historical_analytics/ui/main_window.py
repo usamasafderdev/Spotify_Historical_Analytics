@@ -7,10 +7,11 @@ import tempfile
 
 import pyqtgraph as pg
 from PySide6.QtCore import QThread, QUrl, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QCursor, QDesktopServices, QFont, QIcon
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialogButtonBox,
     QDateEdit,
@@ -34,7 +35,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QHeaderView,
-    QToolTip,
 )
 
 from ..config import APP_NAME, APP_VERSION, APP_ROOT, BACKUP_DIR, EXPORT_DIR, LOG_DIR
@@ -49,6 +49,7 @@ from ..services.analytics import AnalyticsService
 from ..resources import resource_path
 from ..settings import SettingsStore
 from .theme import apply_dark_theme
+from .history_chart import render_history
 from .import_dialog import ImportDialog
 from .workers import (
     DashboardQueryWorker,
@@ -445,9 +446,10 @@ class MainWindow(QMainWindow):
         self.chart_type_combo = QComboBox()
         self.chart_type_combo.addItem("Daily", "daily")
         self.chart_type_combo.addItem("Weekly", "weekly")
+        self.chart_type_combo.addItem("Weekly (from daily)", "weekly_derived")
         self.chart_type_combo.setMinimumWidth(108)
         self.chart_type_combo.currentIndexChanged.connect(self._chart_type_changed)
-        self.chart_type_combo.setToolTip("Daily and weekly chart observations are analyzed separately.")
+        self.chart_type_combo.setToolTip("Daily, source weekly, and daily-derived weeks are separate. Derived weeks run Monday to Sunday, use Sunday as reporting date, and sum observed days only.")
         filter_layout.addWidget(self.chart_type_combo, 0, 1)
         self.start_edit = QDateEdit()
         self.start_edit.setCalendarPopup(True)
@@ -523,9 +525,10 @@ class MainWindow(QMainWindow):
         definitions = [
             ("Available chart streams", "Sum of valid imported chart observations; not official platform totals."),
             ("Charting songs", "Unique track IDs where available; conservative name/artist fallback otherwise."),
-            ("Credited artists", "Distinct credited artist strings present in imported observations."),
+            ("Charting artists", "Supplied artist IDs; unresolved credited strings stay grouped without name splitting."),
             ("Available chart dates", "Dates with at least one observation in the active filter."),
             ("Observed coverage", "Observed dates divided by expected intervals in the selected range; not completeness verification."),
+            ("Mapped albums", "Distinct verified album IDs with charting tracks; unmapped albums are unavailable."),
         ]
         self.kpis = [KPIWidget(title, detail) for title, detail in definitions]
         self._layout_kpi_cards()
@@ -579,7 +582,7 @@ class MainWindow(QMainWindow):
 
     def _layout_kpi_cards(self) -> None:
         width = self.width() - 320
-        columns = 5 if width >= 1100 else 3 if width >= 760 else 2 if width >= 480 else 1
+        columns = 3 if width >= 760 else 2 if width >= 480 else 1
         if columns != self._kpi_columns:
             self._kpi_columns = columns
             while self.kpi_layout.count():
@@ -604,6 +607,28 @@ class MainWindow(QMainWindow):
         if hasattr(self, "kpi_layout"):
             self._layout_kpi_cards()
 
+    def _repeat_control(self, category: str) -> QCheckBox:
+        control = QCheckBox("Hide Repeats")
+        control.setToolTip(
+            "These rankings already contain one row per entity. Repeat indicators count distinct "
+            "reporting dates across the full filtered history. This option preserves every ranked entity and its totals."
+        )
+        control.toggled.connect(lambda checked: self.statusBar().showMessage(
+            f"{category}: one row per entity; historical appearances and stream totals are preserved."
+        ))
+        return control
+
+    def _appearance_item(self, row: dict, stable_identity: bool = True) -> NumericTableItem:
+        count = int(row["chart_appearances"])
+        label = f"Repeat ({count})" if count > 1 and stable_identity else str(count)
+        item = NumericTableItem(label)
+        item.setData(Qt.UserRole, count)
+        item.setToolTip(
+            f"{count} distinct reporting dates in the full selected range and chart source. "
+            + ("One aggregated row per entity." if stable_identity else "Identity unresolved; credited text is not proof of a shared entity.")
+        )
+        return item
+
     def _build_songs_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -617,6 +642,8 @@ class MainWindow(QMainWindow):
         self.song_search.setPlaceholderText("Search songs or artists…")
         self.song_search.textChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.song_search, 1)
+        self.song_hide_repeats = self._repeat_control("Songs")
+        controls.addWidget(self.song_hide_repeats)
         controls.addWidget(QLabel("SHOW"))
         self.song_limit = QComboBox()
         for limit in (50, 100, 200):
@@ -665,6 +692,8 @@ class MainWindow(QMainWindow):
         self.artist_search.setPlaceholderText("Search artist name or supplied ID…")
         self.artist_search.textChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.artist_search, 1)
+        self.artist_hide_repeats = self._repeat_control("Artists")
+        controls.addWidget(self.artist_hide_repeats)
         controls.addWidget(QLabel("SHOW"))
         self.artist_limit = QComboBox()
         for limit in (50, 100, 200):
@@ -713,6 +742,8 @@ class MainWindow(QMainWindow):
         self.album_search.setPlaceholderText("Search album title, artist, or ID…")
         self.album_search.textChanged.connect(self._schedule_dashboard_refresh)
         controls.addWidget(self.album_search, 1)
+        self.album_hide_repeats = self._repeat_control("Albums")
+        controls.addWidget(self.album_hide_repeats)
         controls.addWidget(QLabel("SHOW"))
         self.album_limit = QComboBox()
         for limit in (50, 100, 200):
@@ -796,6 +827,10 @@ class MainWindow(QMainWindow):
         card_layout.addWidget(title)
         card_layout.addWidget(detail)
         card_layout.addWidget(button, 0, Qt.AlignLeft)
+        self.weekly_import_button = QPushButton("Import Weekly CSV")
+        self.weekly_import_button.setToolTip("Import one or more weekly CSV, CSV.GZ, or XLSX files. Each file is validated and committed transactionally.")
+        self.weekly_import_button.clicked.connect(self.import_weekly_files)
+        card_layout.addWidget(self.weekly_import_button, 0, Qt.AlignLeft)
         card_layout.addWidget(status)
         card_layout.addStretch()
         layout.addWidget(card, 1)
@@ -876,15 +911,18 @@ class MainWindow(QMainWindow):
         self.backup_button = backup_button
         backup_button.clicked.connect(self.backup_database)
         card_layout.addWidget(backup_button, 0, Qt.AlignLeft)
+        self.restore_button = QPushButton("Restore database backup")
+        self.restore_button.clicked.connect(self.restore_database)
+        card_layout.addWidget(self.restore_button, 0, Qt.AlignLeft)
         self.metadata_button = QPushButton("Import artist / album metadata")
-        self.metadata_button.setEnabled(False)
+        self.metadata_button.setEnabled(True)
+        self.metadata_button.clicked.connect(self.import_metadata)
         self.metadata_button.setToolTip(
-            "Import artist and album associations with your chart dataset using explicit IDs and names."
+            "Import a metadata file using exact Spotify track, artist, and album IDs."
         )
         card_layout.addWidget(self.metadata_button, 0, Qt.AlignLeft)
         metadata_rights_note = QLabel(
-            "Include stable artist/album IDs and verified names in your chart dataset "
-            "to import those associations."
+            "Import stable artist/album IDs and verified names alongside chart observations or in a separate metadata file."
         )
         metadata_rights_note.setObjectName("muted")
         metadata_rights_note.setWordWrap(True)
@@ -1132,9 +1170,10 @@ class MainWindow(QMainWindow):
             [
                 f"{summary['total_streams']:,}",
                 f"{summary['distinct_tracks']:,}",
-                f"{summary['distinct_artists']:,}",
+                f"{summary['distinct_artist_entities']:,}",
                 f"{summary['chart_dates_with_data']:,}",
                 f"{summary['coverage_percentage']:.1f}%",
+                f"{summary['distinct_albums']:,}",
             ]
             if has_active_data
             else ["—"] * len(self.kpis)
@@ -1193,60 +1232,8 @@ class MainWindow(QMainWindow):
         )
 
     def _render_streams_chart(self, rows: list[dict]) -> None:
-        plot = self.streams_chart.plot
-        plot.clear()
-        if not rows:
-            self.streams_chart.set_empty(True)
-            return
-        points_x: list[float] = []
-        points_y: list[float] = []
-        previous: date | None = None
-        cadence = 7 if self.active_chart_type == "weekly" else 1
-        for row in rows:
-            current = date.fromisoformat(row["chart_date"])
-            if previous is not None and (current - previous).days > cadence:
-                gap = previous + timedelta(days=cadence)
-                points_x.append(datetime.combine(gap, datetime.min.time()).timestamp())
-                points_y.append(float("nan"))
-            points_x.append(datetime.combine(current, datetime.min.time()).timestamp())
-            points_y.append(float(row["streams"]))
-            previous = current
-        line = pg.PlotDataItem(
-            points_x,
-            points_y,
-            pen=pg.mkPen(COLORS["accent_light"], width=2),
-            symbol="o",
-            symbolSize=6,
-            symbolBrush=COLORS["accent"],
-            connect="finite",
-        )
-        plot.addItem(line)
-        plot.setLabel("left", "Chart streams", color=COLORS["muted"])
-        plot.setLabel("bottom", "Chart date", color=COLORS["muted"])
-        plot.enableAutoRange()
-        self.streams_chart.set_empty(False)
-        self._stream_hover_proxy = pg.SignalProxy(plot.scene().sigMouseMoved, rateLimit=30, slot=self._show_stream_tooltip)
+        render_history(self.streams_chart, rows, self.active_chart_type)
         self._stream_hover_rows = rows
-
-    def _show_stream_tooltip(self, event: tuple) -> None:
-        if not hasattr(self, "_stream_hover_rows"):
-            return
-        position = event[0]
-        view = self.streams_chart.plot.getViewBox()
-        if not self.streams_chart.plot.sceneBoundingRect().contains(position):
-            return
-        timestamp = view.mapSceneToView(position).x()
-        rows = self._stream_hover_rows
-        nearest = min(rows, key=lambda row: abs(datetime.fromisoformat(row["chart_date"]).timestamp() - timestamp))
-        chart_date = nearest["chart_date"]
-        period = ""
-        if nearest.get("weekly_start") or nearest.get("weekly_end"):
-            period = f"\nPeriod: {nearest.get('weekly_start') or chart_date} to {nearest.get('weekly_end') or chart_date}"
-        QToolTip.showText(
-            QCursor.pos(),
-            f"{chart_date}{period}\n{int(nearest['streams']):,} chart streams",
-            self.streams_chart,
-        )
 
     def _render_top_songs_chart(self, rows: list[dict]) -> None:
         panel = self.top_songs_chart
@@ -1295,13 +1282,14 @@ class MainWindow(QMainWindow):
                 QTableWidgetItem(str(row["artist_names"])),
                 NumericTableItem(f"{int(row['total_streams']):,}"),
                 NumericTableItem(str(row["best_position"] if row["best_position"] is not None else "—")),
-                NumericTableItem(str(row["chart_appearances"])),
+                self._appearance_item(row, "|" not in row["track_key"]),
             ]
             for col, item in enumerate(cells):
                 item.setData(Qt.UserRole, row["total_streams"] if col == 3 else (
                     rank if col == 0 else row["best_position"] if col == 4 else row["chart_appearances"] if col == 5 else None
                 ))
-                item.setToolTip(item.text())
+                if col != 5:
+                    item.setToolTip(item.text())
                 table.setItem(rank - 1, col, item)
             table.item(rank - 1, 1).setData(Qt.UserRole, row["track_key"])
         table.setSortingEnabled(True)
@@ -1359,15 +1347,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(metrics)
         panel = ChartPanel("Historical streams", "Observations shown for the active chart type and selected date range.")
         layout.addWidget(panel, 1)
-        if rows:
-            x = [datetime.fromisoformat(row["chart_date"]).timestamp() for row in rows]
-            y = [int(row["streams"]) for row in rows]
-            panel.plot.plot(x, y, pen=pg.mkPen(COLORS["accent_light"], width=2), symbol="o", symbolSize=7, symbolBrush=COLORS["accent"])
-            panel.plot.setLabel("left", "Chart streams", color=COLORS["muted"])
-            panel.plot.setLabel("bottom", "Chart date", color=COLORS["muted"])
-            panel.set_empty(False)
-        else:
-            panel.set_empty(True, "No historical observations in the active filters.")
+        self._populate_history_chart(panel, rows)
         close_button = QPushButton("Close")
         close_button.clicked.connect(dialog.accept)
         outer.addWidget(close_button, 0, Qt.AlignRight)
@@ -1389,7 +1369,7 @@ class MainWindow(QMainWindow):
                 QTableWidgetItem(str(row["artist_name"] or "Artist metadata unavailable")),
                 NumericTableItem(f"{int(row['charting_song_streams']):,}"),
                 NumericTableItem(str(row["track_count"])),
-                NumericTableItem(str(row["chart_appearances"])),
+                self._appearance_item(row, bool(row["artist_id"])),
                 NumericTableItem(str(row["best_position"] if row["best_position"] is not None else "—")),
                 QTableWidgetItem(row["first_appearance"] or "—"),
                 QTableWidgetItem(row["latest_appearance"] or "—"),
@@ -1469,7 +1449,7 @@ class MainWindow(QMainWindow):
                 QTableWidgetItem(row["album_artist"] or "Album artist unavailable"),
                 NumericTableItem(f"{int(row['charting_track_streams']):,}"),
                 NumericTableItem(str(row["mapped_track_count"])),
-                NumericTableItem(str(row["chart_appearances"])),
+                self._appearance_item(row),
                 NumericTableItem(str(row["best_position"] if row["best_position"] is not None else "—")),
             ]
             for col, item in enumerate(cells):
@@ -1674,19 +1654,7 @@ class MainWindow(QMainWindow):
             self._export_threads.pop(int(thread.property("exportGeneration")), None)
 
     def _populate_history_chart(self, panel: ChartPanel, rows: list[dict]) -> None:
-        panel.plot.clear()
-        if not rows:
-            panel.set_empty(True, "No real observations match the selected filters.")
-            return
-        x = [datetime.fromisoformat(row["chart_date"]).timestamp() for row in rows]
-        y = [int(row["streams"]) for row in rows]
-        panel.plot.plot(
-            x, y, pen=pg.mkPen(COLORS["accent_light"], width=2),
-            symbol="o", symbolSize=7, symbolBrush=COLORS["accent"],
-        )
-        panel.plot.setLabel("left", "Chart streams", color=COLORS["muted"])
-        panel.plot.setLabel("bottom", "Chart date", color=COLORS["muted"])
-        panel.set_empty(False)
+        render_history(panel, rows, self.active_chart_type)
 
     def refresh_coverage_page(
         self,
@@ -1814,11 +1782,25 @@ class MainWindow(QMainWindow):
         self.open_import_dialog()
 
     def import_metadata(self) -> None:
-        QMessageBox.information(
-            self,
-            "Metadata import unavailable",
-            "Include explicit artist/album IDs and names in the dataset, then use Import Dataset.",
+        path, _ = QFileDialog.getOpenFileName(self, "Import artist / album metadata", "", "Metadata (*.csv *.xlsx)")
+        if not path:
+            return
+        try:
+            dialog = MetadataImportDialog(path, self)
+            if dialog.exec() == QDialog.Accepted:
+                source, attribution = dialog.source_details()
+                self._start_import_worker("metadata", path, source, attribution, dialog.column_mapping())
+        except Exception as error:
+            QMessageBox.critical(self, "Metadata import failed", str(error))
+
+    def import_weekly_files(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Import weekly charts", self._last_directory("last_import_directory"),
+            "Weekly charts (*.csv *.csv.gz *.xlsx)"
         )
+        if paths:
+            self._remember_directory("last_import_directory", paths[0])
+            self._start_import_worker("weekly", "", "User weekly charts", "User supplied", file_paths=paths)
 
     def _start_import_worker(
         self,
@@ -1827,6 +1809,7 @@ class MainWindow(QMainWindow):
         source_name: str,
         source_license: str,
         column_mapping: dict[str, str] | None = None,
+        file_paths: list[str] | None = None,
     ) -> None:
         if self._import_thread is not None:
             QMessageBox.information(self, "Import in progress", "Wait for the current import to finish before starting another.")
@@ -1855,6 +1838,7 @@ class MainWindow(QMainWindow):
             source_license=source_license,
             chart_type=self.active_chart_type,
             column_mapping=column_mapping,
+            file_paths=file_paths,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1877,7 +1861,15 @@ class MainWindow(QMainWindow):
     def _on_import_completed(self, result: object) -> None:
         if self._import_progress is not None:
             self._import_progress.close()
-        if self._import_kind == "metadata":
+        if self._import_kind == "weekly":
+            lines = [
+                f"{row['file']}: {row['status']} - " + (
+                    row["error"] if row["status"] == "Failed" else
+                    f"{row['imported_rows']} imported; {row['duplicates_skipped']} duplicates skipped"
+                ) for row in result
+            ]
+            QMessageBox.information(self, "Weekly import results", "\n".join(lines))
+        elif self._import_kind == "metadata":
             rejected_details = "\n".join(result.rejected_details[:10])
             QMessageBox.information(
                 self,
@@ -2008,6 +2000,33 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Backup complete", f"Database backup saved to:\n{destination}")
         except Exception as exc:
             QMessageBox.critical(self, "Backup failed", str(exc))
+
+    def restore_database(self) -> None:
+        busy = self._import_thread is not None or any(
+            thread.isRunning() for tasks in (self._query_threads, self._detail_threads, self._export_threads)
+            for thread, _ in tasks.values()
+        )
+        if busy or self._demo_mode:
+            QMessageBox.information(self, "Restore unavailable", "Finish background work and leave demo mode before restoring.")
+            return
+        source, _ = QFileDialog.getOpenFileName(self, "Restore database backup", "", "SQLite backup (*.db *.sqlite3)")
+        if not source:
+            return
+        choice = QMessageBox.question(
+            self, "Restore database", "Replace current observations with this backup? A safety backup of your current database will be saved first.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if choice != QMessageBox.Yes:
+            return
+        try:
+            safety = self.db.db_path.parent / "backups" / f"before-restore-{datetime.now():%Y%m%d-%H%M%S-%f}.db"
+            self.db.backup_database(safety)
+            self.db.restore_database(source)
+            self._update_date_bounds()
+            self.refresh_dashboard()
+            QMessageBox.information(self, "Restore complete", f"Database restored. Previous records are saved in:\n{safety}")
+        except Exception as error:
+            QMessageBox.critical(self, "Restore failed", str(error))
 
     def closeEvent(self, event: QCloseEvent) -> None:
         for _, worker in self._query_threads.values():

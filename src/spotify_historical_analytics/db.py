@@ -239,6 +239,41 @@ class DatabaseManager:
         self.connection.execute("PRAGMA user_version = 2")
         self.connection.commit()
 
+        self.connection.executescript("""
+            CREATE TEMP VIEW IF NOT EXISTS analytics_records AS
+            WITH canonical AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY country, chart_type, chart_date,
+                        COALESCE(track_id, track_name || '|' || artist_names),
+                        source = 'DEMO / SYNTHETIC'
+                    ORDER BY id
+                ) AS occurrence
+                FROM main.chart_records
+            ), weekly AS (
+                SELECT MIN(id) AS id, MIN(batch_id) AS batch_id,
+                    MIN(source) AS source, MIN(source_license) AS source_license,
+                    country,
+                    date(chart_date, '-' || ((strftime('%w', chart_date) + 6) % 7) || ' days') AS week_start,
+                    track_id, MIN(track_name) AS track_name, MIN(artist_names) AS artist_names,
+                    SUM(streams) AS streams, COUNT(DISTINCT chart_date) AS observed_days
+                FROM canonical WHERE occurrence = 1 AND chart_type = 'daily'
+                GROUP BY country, week_start,
+                    COALESCE(track_id, track_name || '|' || artist_names),
+                    source = 'DEMO / SYNTHETIC'
+            )
+            SELECT id, batch_id, source, source_license, chart_type, country,
+                chart_date, weekly_start, weekly_end, position, track_id,
+                track_name, artist_names, streams, original_url, 1 AS observed_days
+            FROM canonical WHERE occurrence = 1
+            UNION ALL
+            SELECT id, batch_id, source, source_license, 'weekly_derived', country,
+                date(week_start, '+6 days'), week_start, date(week_start, '+6 days'),
+                RANK() OVER (PARTITION BY country, week_start, source = 'DEMO / SYNTHETIC'
+                             ORDER BY streams DESC),
+                track_id, track_name, artist_names, streams, NULL, observed_days
+            FROM weekly;
+        """)
+
     def _add_missing_columns(self, table_name: str, columns: dict[str, str]) -> None:
         existing = {
             row["name"]
@@ -399,10 +434,19 @@ class DatabaseManager:
                 COUNT(DISTINCT chart_date) AS chart_dates_with_data,
                 MIN(chart_date) AS earliest,
                 MAX(chart_date) AS latest
-            FROM chart_records
+            FROM analytics_records
             WHERE {where_clause}
         """
         total_row = self.connection.execute(totals_sql, params).fetchone()
+        identities = self.connection.execute(
+            f"""SELECT COUNT(DISTINCT COALESCE('id:' || ta.artist_id,
+                         'credit:' || c.artist_names)) AS artists,
+                       COUNT(DISTINCT tal.album_id) AS albums
+                FROM analytics_records c
+                LEFT JOIN track_artists ta ON ta.track_id = c.track_id AND ta.mapping_status = 'id_match'
+                LEFT JOIN track_albums tal ON tal.track_id = c.track_id AND tal.mapping_status = 'id_match'
+                WHERE {where_clause}""", params
+        ).fetchone()
         range_start = start_date or total_row["earliest"]
         range_end = end_date or total_row["latest"]
         coverage = 0.0
@@ -410,7 +454,7 @@ class DatabaseManager:
             start_dt = date.fromisoformat(range_start)
             end_dt = date.fromisoformat(range_end)
             span = (end_dt - start_dt).days
-            expected_intervals = span // 7 + 1 if chart_type == "weekly" else span + 1
+            expected_intervals = span // 7 + 1 if chart_type in {"weekly", "weekly_derived"} else span + 1
             coverage = (
                 int(total_row["chart_dates_with_data"]) / expected_intervals * 100.0
                 if expected_intervals > 0
@@ -421,6 +465,8 @@ class DatabaseManager:
             "total_streams": int(total_row["total_streams"] or 0),
             "distinct_tracks": int(total_row["total_tracks"] or 0),
             "distinct_artists": int(total_row["total_artists"] or 0),
+            "distinct_artist_entities": int(identities["artists"]),
+            "distinct_albums": int(identities["albums"]),
             "chart_dates_with_data": int(total_row["chart_dates_with_data"] or 0),
             "coverage_percentage": round(coverage, 2),
         }
@@ -461,7 +507,7 @@ class DatabaseManager:
                 SUM(streams) AS total_streams,
                 MIN(position) AS best_position,
                 COUNT(DISTINCT chart_date) AS chart_appearances
-            FROM chart_records
+            FROM analytics_records
             WHERE {where_clause}
             GROUP BY track_key
             ORDER BY total_streams DESC, track_name ASC, artist_names ASC
@@ -506,7 +552,7 @@ class DatabaseManager:
                        ta.artist_id AS resolved_id,
                        CASE WHEN ta.artist_id IS NULL THEN c.artist_names
                             ELSE COALESCE(a.artist_name, '[Unlabeled artist ID]') END AS resolved_name
-                FROM chart_records c
+                FROM analytics_records c
                 LEFT JOIN supplied ta
                   ON ta.track_id = COALESCE(c.track_id, c.track_name || '|' || c.artist_names)
                 LEFT JOIN artists a ON a.artist_id = ta.artist_id
@@ -515,7 +561,7 @@ class DatabaseManager:
             SELECT artist_key, resolved_id AS artist_id, resolved_name AS artist_name,
                    SUM(streams) AS charting_song_streams,
                    COUNT(DISTINCT COALESCE(track_id, track_name || '|' || artist_names)) AS track_count,
-                   COUNT(*) AS chart_appearances, MIN(position) AS best_position,
+                   COUNT(DISTINCT chart_date) AS chart_appearances, MIN(position) AS best_position,
                    MIN(chart_date) AS first_appearance, MAX(chart_date) AS latest_appearance,
                    CASE WHEN resolved_id IS NULL THEN 'Unresolved credited string; not split'
                         ELSE 'Full-credit by supplied artist ID' END AS attribution
@@ -558,12 +604,12 @@ class DatabaseManager:
                            COALESCE(a.artist_name, '[Unlabeled artist ID]') AS artist_name,
                            SUM(c.streams) AS charting_song_streams,
                            COUNT(DISTINCT COALESCE(c.track_id, c.track_name || '|' || c.artist_names)) AS track_count,
-                           COUNT(*) AS chart_appearances,
+                           COUNT(DISTINCT c.chart_date) AS chart_appearances,
                            MIN(c.position) AS best_position,
                            MIN(c.chart_date) AS first_appearance,
                            MAX(c.chart_date) AS latest_appearance,
                            'Full-credit by supplied artist ID' AS attribution
-                    FROM chart_records c
+                    FROM analytics_records c
                     JOIN (
                         SELECT DISTINCT track_id, artist_id
                         FROM track_artists WHERE mapping_status = 'id_match'
@@ -583,12 +629,12 @@ class DatabaseManager:
                            NULL AS artist_id, c.artist_names AS artist_name,
                            SUM(c.streams) AS charting_song_streams,
                            COUNT(DISTINCT COALESCE(c.track_id, c.track_name || '|' || c.artist_names)) AS track_count,
-                           COUNT(*) AS chart_appearances,
+                           COUNT(DISTINCT c.chart_date) AS chart_appearances,
                            MIN(c.position) AS best_position,
                            MIN(c.chart_date) AS first_appearance,
                            MAX(c.chart_date) AS latest_appearance,
                            'Unresolved credited string; not split' AS attribution
-                    FROM chart_records c
+                    FROM analytics_records c
                     WHERE {where_clause} AND c.artist_names = ?
                       AND NOT EXISTS (
                           SELECT 1 FROM track_artists ta
@@ -636,7 +682,7 @@ class DatabaseManager:
             f"""
                 SELECT c.chart_date, SUM(c.streams) AS streams,
                        COUNT(*) AS chart_appearances
-                FROM chart_records c
+                FROM analytics_records c
                 WHERE {" AND ".join(filters)} AND {identity_filter}
                 GROUP BY c.chart_date ORDER BY c.chart_date
             """,
@@ -675,11 +721,11 @@ class DatabaseManager:
                        COALESCE(al.album_artist, '') AS album_artist,
                        SUM(c.streams) AS charting_track_streams,
                        COUNT(DISTINCT c.track_id) AS mapped_track_count,
-                       COUNT(*) AS chart_appearances,
+                       COUNT(DISTINCT c.chart_date) AS chart_appearances,
                        MIN(c.position) AS best_position,
                        MIN(c.chart_date) AS first_appearance,
                        MAX(c.chart_date) AS latest_appearance
-                FROM chart_records c
+                FROM analytics_records c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 JOIN albums al ON al.album_id = ta.album_id
                 WHERE {" AND ".join(filters)}
@@ -720,11 +766,11 @@ class DatabaseManager:
                 SELECT al.album_id, al.album_name, al.album_artist, al.release_date,
                        SUM(c.streams) AS charting_track_streams,
                        COUNT(DISTINCT c.track_id) AS mapped_track_count,
-                       COUNT(*) AS chart_appearances,
+                       COUNT(DISTINCT c.chart_date) AS chart_appearances,
                        MIN(c.position) AS best_position,
                        MIN(c.chart_date) AS first_appearance,
                        MAX(c.chart_date) AS latest_appearance
-                FROM chart_records c
+                FROM analytics_records c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 JOIN albums al ON al.album_id = ta.album_id
                 WHERE {" AND ".join(filters)}
@@ -763,9 +809,9 @@ class DatabaseManager:
                 SELECT c.track_id, MIN(c.track_name) AS track_name,
                        MIN(c.artist_names) AS artist_names,
                        SUM(c.streams) AS charting_track_streams,
-                       COUNT(*) AS chart_appearances,
+                       COUNT(DISTINCT c.chart_date) AS chart_appearances,
                        MIN(c.position) AS best_position
-                FROM chart_records c
+                FROM analytics_records c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 WHERE {" AND ".join(filters)}
                 GROUP BY c.track_id
@@ -803,7 +849,7 @@ class DatabaseManager:
             f"""
                 SELECT c.chart_date, SUM(c.streams) AS streams,
                        COUNT(*) AS chart_appearances
-                FROM chart_records c
+                FROM analytics_records c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 WHERE {" AND ".join(filters)}
                 GROUP BY c.chart_date ORDER BY c.chart_date
@@ -839,7 +885,7 @@ class DatabaseManager:
         source_filter = "" if include_demo else " AND source <> ?"
         params: tuple[str, ...] = ("US", chart_type) if include_demo else ("US", chart_type, "DEMO / SYNTHETIC")
         dates_sql = (
-            "SELECT DISTINCT chart_date FROM chart_records WHERE country = ? AND chart_type = ?"
+            "SELECT DISTINCT chart_date FROM analytics_records WHERE country = ? AND chart_type = ?"
             + source_filter
             + " ORDER BY chart_date"
         )
@@ -853,7 +899,7 @@ class DatabaseManager:
         start = date.fromisoformat(earliest)
         end = date.fromisoformat(latest)
         cursor = start
-        interval = timedelta(days=7 if chart_type == "weekly" else 1)
+        interval = timedelta(days=7 if chart_type in {"weekly", "weekly_derived"} else 1)
         while cursor <= end:
             iso = cursor.isoformat()
             if iso not in coverage_dates:
@@ -875,7 +921,7 @@ class DatabaseManager:
             params.append("DEMO / SYNTHETIC")
         where_clause = " AND ".join(filters)
         row = self.connection.execute(
-            f"SELECT MIN(chart_date) AS earliest, MAX(chart_date) AS latest FROM chart_records WHERE {where_clause}",
+            f"SELECT MIN(chart_date) AS earliest, MAX(chart_date) AS latest FROM analytics_records WHERE {where_clause}",
             params,
         ).fetchone()
         return {
@@ -910,8 +956,9 @@ class DatabaseManager:
         rows = self.connection.execute(
             f"""
                 SELECT chart_date, MIN(weekly_start) AS weekly_start,
-                       MAX(weekly_end) AS weekly_end, SUM(streams) AS streams
-                FROM chart_records
+                       MAX(weekly_end) AS weekly_end, SUM(streams) AS streams,
+                       MIN(observed_days) AS observed_days
+                FROM analytics_records
                 WHERE {" AND ".join(filters)}
                 GROUP BY chart_date
                 ORDER BY chart_date
@@ -994,7 +1041,7 @@ class DatabaseManager:
             params.append("DEMO / SYNTHETIC")
         where_clause = " AND ".join(filters)
         rows = self.connection.execute(
-            f"SELECT DISTINCT chart_type FROM chart_records WHERE {where_clause} ORDER BY chart_type",
+            f"SELECT DISTINCT chart_type FROM analytics_records WHERE {where_clause} ORDER BY chart_type",
             params,
         ).fetchall()
         return [row["chart_type"] for row in rows]
@@ -1040,7 +1087,7 @@ class DatabaseManager:
                     MIN(chart_date) AS first_appearance,
                     MAX(chart_date) AS latest_appearance,
                     COUNT(DISTINCT chart_date) AS observed_dates
-                FROM chart_records
+                FROM analytics_records
                 WHERE {where_clause}
                 GROUP BY track_key
             """,
@@ -1094,6 +1141,24 @@ class DatabaseManager:
                     integrity = replacement_connection.execute("PRAGMA integrity_check").fetchone()[0]
                     if integrity != "ok":
                         raise sqlite3.DatabaseError(f"Backup integrity check failed: {integrity}")
+                    required = {"chart_records", "tracks", "artists", "albums", "track_artists", "track_albums"}
+                    tables = {row[0] for row in replacement_connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )}
+                    if not required.issubset(tables):
+                        raise ValueError("This file is not an analytics database backup.")
+                    version = replacement_connection.execute("PRAGMA user_version").fetchone()[0]
+                    if version != 2:
+                        raise ValueError("Restore requires a supported schema version 2 backup.")
+                    current_tables = self.connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                    ).fetchall()
+                    for table in current_tables:
+                        table_name = table[0].replace('"', '""')
+                        expected_columns = {row[1] for row in self.connection.execute(f'PRAGMA table_info("{table_name}")')}
+                        actual_columns = {row[1] for row in replacement_connection.execute(f'PRAGMA table_info("{table_name}")')}
+                        if not expected_columns.issubset(actual_columns):
+                            raise ValueError(f"Backup is missing required fields in {table[0]}.")
 
             self.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             self.connection.close()
@@ -1108,6 +1173,7 @@ class DatabaseManager:
                 self.connection.row_factory = sqlite3.Row
                 self.connection.execute("PRAGMA foreign_keys = ON")
                 self.connection.execute("PRAGMA journal_mode = WAL")
+                self.initialize()
             raise
         finally:
             if temporary_path is not None:
@@ -1116,6 +1182,8 @@ class DatabaseManager:
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA journal_mode = WAL")
+
+        self.initialize()
 
     def seed_demo_dataset(self) -> str:
         self.remove_demo_dataset()

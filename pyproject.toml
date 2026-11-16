@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "us-music-charts-analytics"
-version = "0.1.0"
+version = "0.1.8"
 description = "Windows desktop analytics for user-supplied US music chart data"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -4,6 +4,7 @@ import csv
 import os
 import tempfile
 from pathlib import Path
+from datetime import date, timedelta
 from typing import Any
 
 from openpyxl import Workbook
@@ -127,15 +128,19 @@ def _report_metadata(
     bounds = db.get_available_date_bounds(chart_type=chart_type, include_demo=include_demo)
     effective_start = start_date or bounds["earliest"]
     effective_end = end_date or bounds["latest"]
+    source_start = (
+        (date.fromisoformat(effective_start) - timedelta(days=6)).isoformat()
+        if chart_type == "weekly_derived" and effective_start else effective_start
+    )
     summary = db.get_summary(start_date, end_date, chart_type=chart_type, include_demo=include_demo)
     inventory = db.get_data_inventory(include_demo=include_demo)
     selected_sources = [
         source
         for source in inventory["sources"]
         if source["country"] == "US"
-        and source["chart_type"] == chart_type
+        and source["chart_type"] == ("daily" if chart_type == "weekly_derived" else chart_type)
         and (include_demo or not source["is_demo"])
-        and (effective_start is None or source["latest"] >= effective_start)
+        and (source_start is None or source["latest"] >= source_start)
         and (effective_end is None or source["earliest"] <= effective_end)
     ]
     source_names = sorted({str(source["source"]) for source in selected_sources})
@@ -146,6 +151,8 @@ def _report_metadata(
         ("Category", category.title()),
         ("Market", "United States (US)"),
         ("Chart type", chart_type),
+        ("Reporting periods", "Daily-derived Monday-Sunday weeks, reported on Sunday; only observed daily values are summed; partial weeks are retained." if chart_type == "weekly_derived" else "Original imported reporting dates and periods."),
+        ("Repeat indicators", "Distinct reporting dates per stable entity over the full filtered range; rankings already contain one row per entity."),
         ("Date interval", f"{effective_start or 'No observations'} to {effective_end or 'No observations'}"),
         ("Date filter", f"{start_date or 'All available'} to {end_date or 'All available'}"),
         ("Search filter", search or "None"),
