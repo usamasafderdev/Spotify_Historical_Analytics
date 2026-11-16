@@ -56,6 +56,10 @@ def weekly(path, rows):
     return write_source(path, ["cc", "week_end", "rank", "streams", "track_id", "title", "artists", "artist_uris"], rows)
 
 
+def album_weekly(path, rows):
+    return write_source(path, ["date", "country", "rank", "uri", "album_name", "artist_names"], rows)
+
+
 def observation(streams=100, country="us", end="2024-02-08", position=1, track=TRACK):
     return [country, end, position, streams, track, "TEST DATA Song", "TEST DATA Artist", "spotify:artist:" + ARTIST]
 
@@ -87,6 +91,57 @@ def test_weekly_insertion_market_validation_separation_repeat_and_persistence(db
         assert reopened.get_summary(chart_type="weekly")["total_streams"] == 300
     finally:
         reopened.close()
+
+
+def test_album_weekly_positions_remain_separate_from_song_streams(db, tmp_path):
+    song_path = weekly(tmp_path / "songs.csv.gz", [observation()])
+    integrate_file(db, song_path, "weekly")
+    album_two = "D" * 22
+    path = album_weekly(tmp_path / "charts_albums_weekly.csv", [
+        ["2024-02-08", "us", 1, "spotify:album:" + ALBUM, "TEST DATA Album", "TEST DATA Artist"],
+        ["2024-02-08", "us", 1, "spotify:album:" + ALBUM, "TEST DATA Album", "TEST DATA Artist"],
+        ["2024-02-08", "us", 2, "spotify:album:" + ALBUM, "TEST DATA Album", "TEST DATA Artist"],
+        ["2024-02-08", "us", 2, "spotify:album:" + album_two, "TEST DATA Album Two", "TEST DATA Artist"],
+        ["2024-02-08", "us", 2, "spotify:album:" + album_two, "TEST DATA Album Two", "TEST DATA Artist"],
+        ["2024-02-08", "ca", 1, "spotify:album:" + album_two, "TEST DATA Album Two", "TEST DATA Artist"],
+    ])
+
+    result = integrate_file(db, path, "album_weekly")
+
+    assert result["imported_rows"] == result["album_records_added"] == 1
+    assert result["duplicates"] == 1
+    assert result["conflicts"] == 3
+    assert result["excluded_non_us"] == 1
+    assert result["stream_column_present"] is False
+    records = db.get_album_chart_records()
+    assert [(row["album_id"], row["position"], row["weekly_start"], row["weekly_end"])
+            for row in records] == [(album_two, 2, "2024-02-02", "2024-02-08")]
+    assert db.connection.execute("SELECT COUNT(*) FROM chart_records").fetchone()[0] == 1
+    assert db.connection.execute("SELECT COUNT(*) FROM track_albums").fetchone()[0] == 0
+    assert db.get_summary(chart_type="weekly")["total_streams"] == 100
+
+
+def test_artist_listener_metrics_are_separate_and_conflicts_preserve_existing(db, tmp_path):
+    db.upsert_artist(ARTIST, "TEST DATA Artist")
+    path = write_source(tmp_path / "artist_listeners_daily.csv",
+                        ["artist_id", "date", "listeners"],
+                        [[ARTIST, "2024-02-08", 1000], [ARTIST, "2024-02-08", 1000]])
+
+    result = integrate_file(db, path, "artist_listener_metrics")
+
+    assert result["imported_rows"] == result["listener_records_added"] == 1
+    assert result["duplicates"] == 1
+    assert result["conflicts"] == 0
+    assert db.get_artist_listener_history(ARTIST) == [{"date": "2024-02-08", "listeners": 1000}]
+    assert db.get_summary(chart_type="weekly")["total_streams"] == 0
+
+    changed = write_source(tmp_path / "artist_listeners_daily.csv",
+                           ["artist_id", "date", "listeners"],
+                           [[ARTIST, "2024-02-08", 2000]])
+    result = integrate_file(db, changed, "artist_listener_metrics")
+    assert result["imported_rows"] == 0
+    assert result["conflicts"] == 1
+    assert db.get_artist_listener_history(ARTIST) == [{"date": "2024-02-08", "listeners": 1000}]
 
 
 def test_duplicates_conflicts_and_unchanged_manifest(db, tmp_path):
@@ -149,21 +204,28 @@ def test_cli_refuses_existing_user_database(tmp_path, monkeypatch):
     assert (target / "database" / "analytics.db").read_bytes() == before
 
 
-def test_cli_manifest_skips_unchanged_and_excludes_listener_metric(tmp_path, monkeypatch):
+def test_cli_manifest_integrates_album_charts_and_listener_metrics(tmp_path, monkeypatch):
     downloads = tmp_path / "downloads"
     downloads.mkdir()
     target = tmp_path / "isolated"
     write_source(downloads / "artists.csv", ["artist_uri", "artist_name"], [["spotify:artist:" + ARTIST, "TEST DATA Artist"]])
-    (downloads / "artist_listeners_daily.csv").write_text("artist_id,date,listeners\nTEST DATA,2024-01-01,99999\n")
+    album_weekly(downloads / "charts_albums_weekly.csv", [
+        ["2024-02-08", "us", 1, "spotify:album:" + ALBUM, "TEST DATA Album", "TEST DATA Artist"],
+    ])
+    write_source(downloads / "artist_listeners_daily.csv",
+                 ["artist_id", "date", "listeners"], [[ARTIST, "2024-02-08", 99999]])
     monkeypatch.setattr("sys.argv", ["integration", "--downloads", str(downloads), "--data-dir", str(target)])
     assert integration_main() == 0
+
     def unexpected_read(path):
         raise AssertionError("Unchanged source should not be reopened")
+
     monkeypatch.setattr("spotify_historical_analytics.local_integration.locked_source", unexpected_read)
     assert integration_main() == 0
     report = json.loads((target / "source-manifest.json").read_text())
-    assert len(report["files"]) == 2
-    assert next(row for row in report["files"] if row["category"] == "artist_listener_metrics")["status"] == "excluded"
+    assert len(report["files"]) == 3
+    assert next(row for row in report["files"] if row["category"] == "artist_listener_metrics")["status"] == "complete"
+    assert next(row for row in report["files"] if row["category"] == "album_weekly")["status"] == "complete"
 
 
 def test_cli_skips_recent_source_and_processes_other_completed_files(tmp_path, monkeypatch):

@@ -106,6 +106,14 @@ def initialize(db: DatabaseManager) -> None:
             track_id TEXT, chart_date TEXT, weekly_start TEXT, weekly_end TEXT,
             position INTEGER, track_name TEXT, artist_names TEXT, streams INTEGER, conflict INTEGER DEFAULT 0
         );
+        CREATE TEMP TABLE IF NOT EXISTS integration_album_chart (
+            country TEXT, chart_date TEXT, weekly_start TEXT, weekly_end TEXT,
+            position INTEGER, album_id TEXT, album_name TEXT, artist_names TEXT,
+            conflict INTEGER DEFAULT 0
+        );
+        CREATE TEMP TABLE IF NOT EXISTS integration_artist_listeners (
+            artist_id TEXT, metric_date TEXT, listeners INTEGER, conflict INTEGER DEFAULT 0
+        );
     """)
     db.connection.execute("PRAGMA wal_autocheckpoint=2000")
 
@@ -239,6 +247,163 @@ def flush_chart(db, batch, rows, relationships, result):
     check_space(db)
 
 
+def flush_album_chart(db, batch, rows, result):
+    connection = db.connection
+    connection.execute("DELETE FROM integration_album_chart")
+    connection.executemany(
+        """INSERT INTO integration_album_chart(
+               country,chart_date,weekly_start,weekly_end,position,album_id,album_name,artist_names
+           ) VALUES (?,?,?,?,?,?,?,?)""",
+        rows,
+    )
+    connection.execute("""UPDATE integration_album_chart SET conflict=1 WHERE (country,chart_date,album_id) IN (
+        SELECT country,chart_date,album_id FROM integration_album_chart
+        GROUP BY country,chart_date,album_id
+        HAVING COUNT(DISTINCT position)>1 OR COUNT(DISTINCT album_name)>1 OR COUNT(DISTINCT artist_names)>1
+    ) OR EXISTS (SELECT 1 FROM album_chart_records existing
+        WHERE existing.country=integration_album_chart.country
+          AND existing.chart_type='weekly'
+          AND existing.chart_date=integration_album_chart.chart_date
+          AND existing.album_id=integration_album_chart.album_id
+          AND (existing.position != integration_album_chart.position
+               OR existing.album_name != integration_album_chart.album_name
+               OR existing.artist_names != integration_album_chart.artist_names
+               OR existing.weekly_start != integration_album_chart.weekly_start
+               OR existing.weekly_end != integration_album_chart.weekly_end))""")
+    conflicts = connection.execute(
+        "SELECT COUNT(*) FROM integration_album_chart WHERE conflict=1"
+    ).fetchone()[0]
+    result["conflicts"] += conflicts
+    added = insert_count(connection, """INSERT OR IGNORE INTO album_chart_records(
+        batch_id,source,source_license,chart_type,country,chart_date,weekly_start,weekly_end,
+        position,album_id,album_name,artist_names)
+        SELECT DISTINCT ?,?,?,'weekly',incoming.country,incoming.chart_date,incoming.weekly_start,
+            incoming.weekly_end,incoming.position,incoming.album_id,incoming.album_name,incoming.artist_names
+        FROM integration_album_chart incoming
+        WHERE incoming.conflict=0 AND NOT EXISTS (
+            SELECT 1 FROM album_chart_records existing
+            WHERE existing.country=incoming.country AND existing.chart_type='weekly'
+              AND existing.chart_date=incoming.chart_date AND existing.album_id=incoming.album_id
+        )""", (batch, SOURCE, SOURCE_NOTE))
+    result["imported_rows"] += added
+    result["album_records_added"] += added
+    result["duplicates"] += len(rows) - conflicts - added
+    check_space(db)
+
+
+def import_album_weekly(db, reader, result):
+    required = {"date", "country", "rank", "uri", "album_name", "artist_names"}
+    if not required.issubset(reader.fieldnames or []):
+        raise ValueError("Weekly album source schema is not recognized")
+    result["stream_column_present"] = "streams" in (reader.fieldnames or [])
+    batch = db.create_batch(SOURCE, SOURCE_NOTE, "weekly_album", "US")
+    rows = []
+    album_ids = set()
+    dates = set()
+    for raw in reader:
+        result["scanned_rows"] += 1
+        if DatabaseManager.normalize_country(raw["country"]) != "US":
+            result["excluded_non_us"] += 1
+            continue
+        try:
+            chart_date = date.fromisoformat(raw["date"])
+            album_id = spotify_id(raw["uri"], "album")
+            position = int(raw["rank"])
+            album_name = raw["album_name"].strip()
+            if (chart_date.isoformat() != raw["date"] or chart_date.weekday() != 3
+                    or not album_id or position < 1 or not album_name):
+                raise ValueError("Invalid US album chart identity, date, or position")
+            rows.append((
+                "US", chart_date.isoformat(), (chart_date - timedelta(days=6)).isoformat(),
+                chart_date.isoformat(), position, album_id, album_name, raw["artist_names"],
+            ))
+            album_ids.add(album_id)
+            dates.add(chart_date.isoformat())
+            result["earliest"] = min(result["earliest"] or chart_date.isoformat(), chart_date.isoformat())
+            result["latest"] = max(result["latest"] or chart_date.isoformat(), chart_date.isoformat())
+        except (KeyError, ValueError):
+            result["invalid_rows"] += 1
+        if len(rows) >= BATCH_SIZE:
+            flush_album_chart(db, batch, rows, result)
+            rows = []
+    if rows:
+        flush_album_chart(db, batch, rows, result)
+    known_album_ids = {
+        row[0] for row in db.connection.execute("SELECT album_id FROM albums")
+    }
+    result["unique_album_ids"] = len(album_ids)
+    result["album_ids_matching_metadata"] = len(album_ids & known_album_ids)
+    result["observed_dates"] = len(dates)
+
+
+def flush_artist_listeners(db, rows, result):
+    connection = db.connection
+    connection.execute("DELETE FROM integration_artist_listeners")
+    connection.executemany(
+        "INSERT INTO integration_artist_listeners(artist_id,metric_date,listeners) VALUES (?,?,?)",
+        rows,
+    )
+    connection.execute("""UPDATE integration_artist_listeners SET conflict=1 WHERE (artist_id,metric_date) IN (
+        SELECT artist_id,metric_date FROM integration_artist_listeners
+        GROUP BY artist_id,metric_date HAVING COUNT(DISTINCT listeners)>1
+    ) OR EXISTS (SELECT 1 FROM artist_listener_records existing
+        WHERE existing.artist_id=integration_artist_listeners.artist_id
+          AND existing.metric_date=integration_artist_listeners.metric_date
+          AND existing.listeners != integration_artist_listeners.listeners)""")
+    conflicts = connection.execute(
+        "SELECT COUNT(*) FROM integration_artist_listeners WHERE conflict=1"
+    ).fetchone()[0]
+    result["conflicts"] += conflicts
+    added = insert_count(connection, """INSERT OR IGNORE INTO artist_listener_records(
+        artist_id,metric_date,listeners,source,source_license)
+        SELECT DISTINCT incoming.artist_id,incoming.metric_date,incoming.listeners,?,?
+        FROM integration_artist_listeners incoming
+        WHERE incoming.conflict=0 AND NOT EXISTS (
+            SELECT 1 FROM artist_listener_records existing
+            WHERE existing.artist_id=incoming.artist_id
+              AND existing.metric_date=incoming.metric_date
+        )""", (SOURCE, SOURCE_NOTE))
+    result["imported_rows"] += added
+    result["listener_records_added"] += added
+    result["duplicates"] += len(rows) - conflicts - added
+    check_space(db)
+
+
+def import_artist_listener_metrics(db, reader, result):
+    if not {"artist_id", "date", "listeners"}.issubset(reader.fieldnames or []):
+        raise ValueError("Artist listener source schema is not recognized")
+    rows = []
+    artist_ids = set()
+    dates = set()
+    for raw in reader:
+        result["scanned_rows"] += 1
+        try:
+            artist_id = spotify_id(raw["artist_id"], "artist")
+            metric_date = date.fromisoformat(raw["date"])
+            listeners = int(raw["listeners"])
+            if (not artist_id or metric_date.isoformat() != raw["date"]
+                    or listeners < 0 or listeners > 2**63 - 1):
+                raise ValueError("Invalid artist listener identity, date, or count")
+            rows.append((artist_id, metric_date.isoformat(), listeners))
+            artist_ids.add(artist_id)
+            dates.add(metric_date.isoformat())
+            result["earliest"] = min(result["earliest"] or metric_date.isoformat(), metric_date.isoformat())
+            result["latest"] = max(result["latest"] or metric_date.isoformat(), metric_date.isoformat())
+        except (KeyError, ValueError):
+            result["invalid_rows"] += 1
+        if len(rows) >= BATCH_SIZE:
+            flush_artist_listeners(db, rows, result)
+            rows = []
+    if rows:
+        flush_artist_listeners(db, rows, result)
+    known_artist_ids = {
+        row[0] for row in db.connection.execute("SELECT artist_id FROM artists")
+    }
+    result["unique_artist_ids"] = len(artist_ids)
+    result["artist_ids_matching_metadata"] = len(artist_ids & known_artist_ids)
+    result["observed_dates"] = len(dates)
+
+
 def import_weekly(db, reader, result):
     if not WEEKLY_COLUMNS.issubset(reader.fieldnames or []):
         raise ValueError("Weekly source schema is not recognized")
@@ -281,6 +446,11 @@ def integrate_file(db: DatabaseManager, path: Path, category: str) -> dict:
               "invalid_rows": 0, "excluded_non_us": 0, "entities_added": 0, "references_added": 0,
               "track_artist_links": 0, "album_artist_links": 0, "earliest": None, "latest": None,
               "conflict_examples": []}
+    if category == "album_weekly":
+        result["album_records_added"] = 0
+        result["stream_column_present"] = False
+    elif category == "artist_listener_metrics":
+        result["listener_records_added"] = 0
     with db.transaction():
         with locked_source(path) as (binary, initial):
             digest = hashlib.sha256()
@@ -293,6 +463,10 @@ def integrate_file(db: DatabaseManager, path: Path, category: str) -> dict:
             db.ensure_source(SOURCE, SOURCE_NOTE)
             if category == "weekly":
                 import_weekly(db, reader, result)
+            elif category == "album_weekly":
+                import_album_weekly(db, reader, result)
+            elif category == "artist_listener_metrics":
+                import_artist_listener_metrics(db, reader, result)
             else:
                 import_metadata(db, path, category, reader, result)
             db.connection.execute("INSERT OR REPLACE INTO integration_files(path,size_bytes,modified_ns,sha256,category,status,result_json) VALUES (?,?,?,?,?,'complete',?)",
@@ -325,6 +499,13 @@ def main() -> int:
                 candidates_to_import.append((path, category))
         for path in sorted(options.downloads.glob("spotify_top200_positions_*.csv.gz")):
             candidates_to_import.append((path, "weekly"))
+        for filename, category in (
+            ("charts_albums_weekly.csv", "album_weekly"),
+            ("artist_listeners_daily.csv", "artist_listener_metrics"),
+        ):
+            path = options.downloads / filename
+            if path.is_file():
+                candidates_to_import.append((path, category))
         for path, category in candidates_to_import:
             try:
                 print(json.dumps(integrate_file(db, path, category)), flush=True)
@@ -334,15 +515,6 @@ def main() -> int:
                 result = {"file": path.name, "status": "skipped", "reason": str(error)}
                 skipped.append(result)
                 print(json.dumps(result), flush=True)
-        listeners = options.downloads / "artist_listeners_daily.csv"
-        if listeners.is_file():
-            stat = listeners.stat()
-            with db.transaction():
-                db.connection.execute(
-                    "INSERT OR REPLACE INTO integration_files(path,size_bytes,modified_ns,category,status,result_json) VALUES (?,?,?,'artist_listener_metrics','excluded',?)",
-                    (str(listeners.resolve()), stat.st_size, stat.st_mtime_ns,
-                     json.dumps({"reason": "Artist listener counts are not US chart streams; source was not imported or scanned."})),
-                )
         db.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         manifest = [dict(row) for row in db.connection.execute("SELECT * FROM integration_files ORDER BY path")]
         report = {"database": str(db_path), "provenance": SOURCE_NOTE, "files": manifest,

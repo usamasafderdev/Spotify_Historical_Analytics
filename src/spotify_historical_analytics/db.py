@@ -144,6 +144,32 @@ class DatabaseManager:
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
+            CREATE TABLE IF NOT EXISTS album_chart_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                source_license TEXT,
+                chart_type TEXT NOT NULL,
+                country TEXT NOT NULL,
+                chart_date TEXT NOT NULL,
+                weekly_start TEXT NOT NULL,
+                weekly_end TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                album_id TEXT NOT NULL,
+                album_name TEXT NOT NULL,
+                artist_names TEXT NOT NULL,
+                UNIQUE (chart_type, country, chart_date, album_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS artist_listener_records (
+                artist_id TEXT NOT NULL,
+                metric_date TEXT NOT NULL,
+                listeners INTEGER NOT NULL CHECK (listeners >= 0),
+                source TEXT NOT NULL,
+                source_license TEXT,
+                PRIMARY KEY (artist_id, metric_date)
+            );
+
             CREATE TABLE IF NOT EXISTS track_artists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 track_id TEXT NOT NULL,
@@ -192,6 +218,10 @@ class DatabaseManager:
             CREATE INDEX IF NOT EXISTS idx_chart_records_market_type_date ON chart_records(country, chart_type, chart_date);
             CREATE INDEX IF NOT EXISTS idx_chart_records_filter_source ON chart_records(country, chart_type, source, chart_date);
             CREATE INDEX IF NOT EXISTS idx_chart_records_artist ON chart_records(country, chart_type, artist_names, chart_date);
+            CREATE INDEX IF NOT EXISTS idx_album_chart_records_date
+                ON album_chart_records(country, chart_type, chart_date, position);
+            CREATE INDEX IF NOT EXISTS idx_artist_listener_records_date
+                ON artist_listener_records(artist_id, metric_date);
             CREATE INDEX IF NOT EXISTS idx_chart_records_real_analytics
                 ON chart_records(country, chart_type, source, chart_date, artist_names, track_id, streams, position, track_name)
                 WHERE source <> 'DEMO / SYNTHETIC';
@@ -687,6 +717,68 @@ class DatabaseManager:
                 GROUP BY c.chart_date ORDER BY c.chart_date
             """,
             params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_artist_listener_history(
+        self,
+        artist_id: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[dict]:
+        self.validate_date_range(start_date, end_date)
+        if not re.fullmatch(r"[A-Za-z0-9]{22}", artist_id.strip()):
+            raise ValueError("artist_id must be a Spotify artist ID")
+        filters = ["artist_id = ?"]
+        params: list[str] = [artist_id.strip()]
+        if start_date:
+            filters.append("metric_date >= ?")
+            params.append(start_date)
+        if end_date:
+            filters.append("metric_date <= ?")
+            params.append(end_date)
+        rows = self.connection.execute(
+            f"""
+                SELECT metric_date AS date, listeners
+                FROM artist_listener_records
+                WHERE {" AND ".join(filters)}
+                ORDER BY metric_date
+            """,
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_album_chart_records(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 200,
+        search: str | None = None,
+    ) -> list[dict]:
+        self.validate_date_range(start_date, end_date)
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        filters = ["country = ?", "chart_type = ?"]
+        params: list[str | int] = ["US", "weekly"]
+        if start_date:
+            filters.append("chart_date >= ?")
+            params.append(start_date)
+        if end_date:
+            filters.append("chart_date <= ?")
+            params.append(end_date)
+        if search:
+            filters.append("(album_id LIKE ? OR album_name LIKE ? COLLATE NOCASE OR artist_names LIKE ? COLLATE NOCASE)")
+            params.extend([f"%{search}%"] * 3)
+        rows = self.connection.execute(
+            f"""
+                SELECT chart_date, weekly_start, weekly_end, position, album_id,
+                       album_name, artist_names, source
+                FROM album_chart_records
+                WHERE {" AND ".join(filters)}
+                ORDER BY chart_date DESC, position, album_id
+                LIMIT ?
+            """,
+            [*params, limit],
         ).fetchall()
         return [dict(row) for row in rows]
 
