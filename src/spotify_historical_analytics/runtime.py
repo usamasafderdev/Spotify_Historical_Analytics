@@ -5,6 +5,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import shutil
 from contextlib import closing
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -14,8 +15,36 @@ from PySide6.QtCore import QLockFile
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .config import APP_ROOT, DB_PATH, LOG_PATH, ensure_user_directories
+from .resources import resource_path
 
 LOGGER = logging.getLogger("us_music_charts_analytics")
+
+
+def initialize_release_seed(destination: Path = DB_PATH, seed: Path | None = None) -> bool:
+    source = seed or resource_path("seed/analytics.sqlite3")
+    if destination.exists() or not source.is_file():
+        return False
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    required = source.stat().st_size + 200 * 1024**2
+    if shutil.disk_usage(destination.parent).free < required:
+        raise OSError(f"Historical data requires {required / 1024**3:.2f} GiB free in {destination.parent}.")
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=".seed-", suffix=".tmp", delete=False) as target:
+            temporary_path = Path(target.name)
+            with source.open("rb") as original:
+                shutil.copyfileobj(original, target, 1024 * 1024)
+        with closing(sqlite3.connect(f"{temporary_path.resolve().as_uri()}?mode=ro", uri=True)) as connection:
+            if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise sqlite3.DatabaseError("Bundled historical data failed its integrity check.")
+        try:
+            os.link(temporary_path, destination)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def configure_logging() -> None:

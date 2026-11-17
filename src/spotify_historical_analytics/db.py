@@ -59,18 +59,24 @@ class DatabaseManager:
         if start_date > end_date:
             raise ValueError("start_date must be on or before end_date")
 
-    def __init__(self, db_path: str | Path | None = None) -> None:
+    def __init__(self, db_path: str | Path | None = None, *, read_only: bool = False) -> None:
         self.db_path = Path(db_path) if db_path is not None else DB_PATH
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if not read_only:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._transaction_depth = 0
-        self.connection = sqlite3.connect(str(self.db_path))
+        self.connection = (sqlite3.connect(f"{self.db_path.resolve().as_uri()}?mode=ro", uri=True)
+                           if read_only else sqlite3.connect(str(self.db_path)))
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
-        self.connection.execute("PRAGMA journal_mode = WAL")
+        if not read_only:
+            self.connection.execute("PRAGMA journal_mode = WAL")
         # Keep DISTINCT/GROUP BY scratch trees off the disk; no persistent summaries.
         self.connection.execute("PRAGMA temp_store = MEMORY")
         try:
-            self.initialize()
+            if read_only:
+                self._create_analytics_view()
+            else:
+                self.initialize()
         except Exception:
             self.connection.close()
             raise
@@ -170,6 +176,28 @@ class DatabaseManager:
                 PRIMARY KEY (artist_id, metric_date)
             );
 
+            CREATE TABLE IF NOT EXISTS artist_chart_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                source_license TEXT,
+                chart_type TEXT NOT NULL,
+                country TEXT NOT NULL,
+                chart_date TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                artist_id TEXT NOT NULL,
+                artist_name TEXT NOT NULL,
+                peak_rank INTEGER,
+                previous_rank INTEGER,
+                days_on_chart INTEGER,
+                consecutive_days INTEGER,
+                entry_status TEXT,
+                peak_date TEXT,
+                entry_rank INTEGER,
+                entry_date TEXT,
+                UNIQUE (chart_type, country, chart_date, artist_id)
+            );
+
             CREATE TABLE IF NOT EXISTS track_artists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 track_id TEXT NOT NULL,
@@ -212,6 +240,7 @@ class DatabaseManager:
             );
 
             CREATE INDEX IF NOT EXISTS idx_chart_records_date ON chart_records(chart_date, chart_type, country);
+            CREATE INDEX IF NOT EXISTS idx_chart_records_identity ON chart_records(country, chart_type, chart_date, track_id, source);
             CREATE INDEX IF NOT EXISTS idx_chart_records_source ON chart_records(source, chart_date);
             CREATE INDEX IF NOT EXISTS idx_chart_records_track ON chart_records(track_id, track_name);
             CREATE INDEX IF NOT EXISTS idx_chart_records_streams ON chart_records(streams);
@@ -222,6 +251,10 @@ class DatabaseManager:
                 ON album_chart_records(country, chart_type, chart_date, position);
             CREATE INDEX IF NOT EXISTS idx_artist_listener_records_date
                 ON artist_listener_records(artist_id, metric_date);
+            CREATE INDEX IF NOT EXISTS idx_artist_chart_records_date
+                ON artist_chart_records(country, chart_type, chart_date, position);
+            CREATE INDEX IF NOT EXISTS idx_artist_chart_records_artist
+                ON artist_chart_records(artist_id, chart_date);
             CREATE INDEX IF NOT EXISTS idx_chart_records_real_analytics
                 ON chart_records(country, chart_type, source, chart_date, artist_names, track_id, streams, position, track_name)
                 WHERE source <> 'DEMO / SYNTHETIC';
@@ -269,40 +302,56 @@ class DatabaseManager:
         self.connection.execute("PRAGMA user_version = 2")
         self.connection.commit()
 
+        self._create_analytics_view()
+
+    def _create_analytics_view(self) -> None:
         self.connection.executescript("""
-            CREATE TEMP VIEW IF NOT EXISTS analytics_records AS
-            WITH canonical AS (
-                SELECT *, ROW_NUMBER() OVER (
-                    PARTITION BY country, chart_type, chart_date,
-                        COALESCE(track_id, track_name || '|' || artist_names),
-                        source = 'DEMO / SYNTHETIC'
-                    ORDER BY id
-                ) AS occurrence
-                FROM main.chart_records
-            ), weekly AS (
+            CREATE TEMP VIEW IF NOT EXISTS analytics_observations AS
+                SELECT current.id, current.batch_id, current.source, current.source_license,
+                    current.chart_type, current.country, current.chart_date,
+                    current.weekly_start, current.weekly_end, current.position,
+                    current.track_id, current.track_name, current.artist_names,
+                    current.streams, current.original_url, 1 AS observed_days
+                FROM main.chart_records current
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM main.chart_records previous
+                    WHERE previous.country=current.country AND previous.chart_type=current.chart_type
+                      AND previous.chart_date=current.chart_date AND previous.track_id IS current.track_id
+                      AND (current.track_id IS NOT NULL OR (previous.track_name=current.track_name AND previous.artist_names=current.artist_names))
+                      AND (previous.source='DEMO / SYNTHETIC')=(current.source='DEMO / SYNTHETIC')
+                      AND previous.id<current.id
+                );
+            CREATE TEMP VIEW IF NOT EXISTS analytics_derived AS
+            WITH weekly AS (
                 SELECT MIN(id) AS id, MIN(batch_id) AS batch_id,
                     MIN(source) AS source, MIN(source_license) AS source_license,
                     country,
                     date(chart_date, '-' || ((strftime('%w', chart_date) + 6) % 7) || ' days') AS week_start,
                     track_id, MIN(track_name) AS track_name, MIN(artist_names) AS artist_names,
                     SUM(streams) AS streams, COUNT(DISTINCT chart_date) AS observed_days
-                FROM canonical WHERE occurrence = 1 AND chart_type = 'daily'
+                FROM analytics_observations WHERE chart_type = 'daily'
                 GROUP BY country, week_start,
                     COALESCE(track_id, track_name || '|' || artist_names),
                     source = 'DEMO / SYNTHETIC'
+            ), ranked_weekly AS (
+                SELECT *, RANK() OVER (
+                    PARTITION BY country, week_start, source = 'DEMO / SYNTHETIC'
+                    ORDER BY streams DESC) AS position
+                FROM weekly
             )
-            SELECT id, batch_id, source, source_license, chart_type, country,
-                chart_date, weekly_start, weekly_end, position, track_id,
-                track_name, artist_names, streams, original_url, 1 AS observed_days
-            FROM canonical WHERE occurrence = 1
-            UNION ALL
-            SELECT id, batch_id, source, source_license, 'weekly_derived', country,
-                date(week_start, '+6 days'), week_start, date(week_start, '+6 days'),
-                RANK() OVER (PARTITION BY country, week_start, source = 'DEMO / SYNTHETIC'
-                             ORDER BY streams DESC),
-                track_id, track_name, artist_names, streams, NULL, observed_days
-            FROM weekly;
+            SELECT id, batch_id, source, source_license, 'weekly_derived' AS chart_type, country,
+                date(week_start, '+6 days') AS chart_date, week_start AS weekly_start,
+                date(week_start, '+6 days') AS weekly_end,
+                position,
+                track_id, track_name, artist_names, streams, NULL AS original_url, observed_days
+            FROM ranked_weekly;
+            CREATE TEMP VIEW IF NOT EXISTS analytics_records AS
+                SELECT * FROM analytics_observations UNION ALL SELECT * FROM analytics_derived;
         """)
+
+    @staticmethod
+    def analytics_table(chart_type: str) -> str:
+        return "analytics_derived" if chart_type == "weekly_derived" else "analytics_observations"
 
     def _add_missing_columns(self, table_name: str, columns: dict[str, str]) -> None:
         existing = {
@@ -464,7 +513,7 @@ class DatabaseManager:
                 COUNT(DISTINCT chart_date) AS chart_dates_with_data,
                 MIN(chart_date) AS earliest,
                 MAX(chart_date) AS latest
-            FROM analytics_records
+            FROM {self.analytics_table(chart_type)}
             WHERE {where_clause}
         """
         total_row = self.connection.execute(totals_sql, params).fetchone()
@@ -472,7 +521,7 @@ class DatabaseManager:
             f"""SELECT COUNT(DISTINCT COALESCE('id:' || ta.artist_id,
                          'credit:' || c.artist_names)) AS artists,
                        COUNT(DISTINCT tal.album_id) AS albums
-                FROM analytics_records c
+                FROM {self.analytics_table(chart_type)} c
                 LEFT JOIN track_artists ta ON ta.track_id = c.track_id AND ta.mapping_status = 'id_match'
                 LEFT JOIN track_albums tal ON tal.track_id = c.track_id AND tal.mapping_status = 'id_match'
                 WHERE {where_clause}""", params
@@ -537,7 +586,7 @@ class DatabaseManager:
                 SUM(streams) AS total_streams,
                 MIN(position) AS best_position,
                 COUNT(DISTINCT chart_date) AS chart_appearances
-            FROM analytics_records
+            FROM {self.analytics_table(chart_type)}
             WHERE {where_clause}
             GROUP BY track_key
             ORDER BY total_streams DESC, track_name ASC, artist_names ASC
@@ -582,7 +631,7 @@ class DatabaseManager:
                        ta.artist_id AS resolved_id,
                        CASE WHEN ta.artist_id IS NULL THEN c.artist_names
                             ELSE COALESCE(a.artist_name, '[Unlabeled artist ID]') END AS resolved_name
-                FROM analytics_records c
+                FROM {self.analytics_table(chart_type)} c
                 LEFT JOIN supplied ta
                   ON ta.track_id = COALESCE(c.track_id, c.track_name || '|' || c.artist_names)
                 LEFT JOIN artists a ON a.artist_id = ta.artist_id
@@ -639,7 +688,7 @@ class DatabaseManager:
                            MIN(c.chart_date) AS first_appearance,
                            MAX(c.chart_date) AS latest_appearance,
                            'Full-credit by supplied artist ID' AS attribution
-                    FROM analytics_records c
+                    FROM {self.analytics_table(chart_type)} c
                     JOIN (
                         SELECT DISTINCT track_id, artist_id
                         FROM track_artists WHERE mapping_status = 'id_match'
@@ -664,7 +713,7 @@ class DatabaseManager:
                            MIN(c.chart_date) AS first_appearance,
                            MAX(c.chart_date) AS latest_appearance,
                            'Unresolved credited string; not split' AS attribution
-                    FROM analytics_records c
+                    FROM {self.analytics_table(chart_type)} c
                     WHERE {where_clause} AND c.artist_names = ?
                       AND NOT EXISTS (
                           SELECT 1 FROM track_artists ta
@@ -712,7 +761,7 @@ class DatabaseManager:
             f"""
                 SELECT c.chart_date, SUM(c.streams) AS streams,
                        COUNT(*) AS chart_appearances
-                FROM analytics_records c
+                FROM {self.analytics_table(chart_type)} c
                 WHERE {" AND ".join(filters)} AND {identity_filter}
                 GROUP BY c.chart_date ORDER BY c.chart_date
             """,
@@ -745,6 +794,47 @@ class DatabaseManager:
                 ORDER BY metric_date
             """,
             params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_artist_chart_records(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        artist_id: str | None = None,
+        search: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        self.validate_date_range(start_date, end_date)
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        filters = ["country = ?", "chart_type = ?"]
+        params: list[str | int] = ["US", "daily"]
+        if start_date:
+            filters.append("chart_date >= ?")
+            params.append(start_date)
+        if end_date:
+            filters.append("chart_date <= ?")
+            params.append(end_date)
+        if artist_id:
+            if not re.fullmatch(r"[A-Za-z0-9]{22}", artist_id.strip()):
+                raise ValueError("artist_id must be a Spotify artist ID")
+            filters.append("artist_id = ?")
+            params.append(artist_id.strip())
+        if search:
+            filters.append("(artist_id LIKE ? OR artist_name LIKE ? COLLATE NOCASE)")
+            params.extend([f"%{search}%"] * 2)
+        rows = self.connection.execute(
+            f"""
+                SELECT chart_date, position, artist_id, artist_name, peak_rank,
+                       previous_rank, days_on_chart, consecutive_days, entry_status,
+                       peak_date, entry_rank, entry_date, source
+                FROM artist_chart_records
+                WHERE {" AND ".join(filters)}
+                ORDER BY chart_date DESC, position, artist_id
+                LIMIT ?
+            """,
+            [*params, limit],
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -817,7 +907,7 @@ class DatabaseManager:
                        MIN(c.position) AS best_position,
                        MIN(c.chart_date) AS first_appearance,
                        MAX(c.chart_date) AS latest_appearance
-                FROM analytics_records c
+                FROM {self.analytics_table(chart_type)} c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 JOIN albums al ON al.album_id = ta.album_id
                 WHERE {" AND ".join(filters)}
@@ -862,7 +952,7 @@ class DatabaseManager:
                        MIN(c.position) AS best_position,
                        MIN(c.chart_date) AS first_appearance,
                        MAX(c.chart_date) AS latest_appearance
-                FROM analytics_records c
+                FROM {self.analytics_table(chart_type)} c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 JOIN albums al ON al.album_id = ta.album_id
                 WHERE {" AND ".join(filters)}
@@ -903,7 +993,7 @@ class DatabaseManager:
                        SUM(c.streams) AS charting_track_streams,
                        COUNT(DISTINCT c.chart_date) AS chart_appearances,
                        MIN(c.position) AS best_position
-                FROM analytics_records c
+                FROM {self.analytics_table(chart_type)} c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 WHERE {" AND ".join(filters)}
                 GROUP BY c.track_id
@@ -941,7 +1031,7 @@ class DatabaseManager:
             f"""
                 SELECT c.chart_date, SUM(c.streams) AS streams,
                        COUNT(*) AS chart_appearances
-                FROM analytics_records c
+                FROM {self.analytics_table(chart_type)} c
                 JOIN track_albums ta ON ta.track_id = c.track_id
                 WHERE {" AND ".join(filters)}
                 GROUP BY c.chart_date ORDER BY c.chart_date
@@ -977,7 +1067,7 @@ class DatabaseManager:
         source_filter = "" if include_demo else " AND source <> ?"
         params: tuple[str, ...] = ("US", chart_type) if include_demo else ("US", chart_type, "DEMO / SYNTHETIC")
         dates_sql = (
-            "SELECT DISTINCT chart_date FROM analytics_records WHERE country = ? AND chart_type = ?"
+            f"SELECT DISTINCT chart_date FROM {self.analytics_table(chart_type)} WHERE country = ? AND chart_type = ?"
             + source_filter
             + " ORDER BY chart_date"
         )
@@ -1013,7 +1103,7 @@ class DatabaseManager:
             params.append("DEMO / SYNTHETIC")
         where_clause = " AND ".join(filters)
         row = self.connection.execute(
-            f"SELECT MIN(chart_date) AS earliest, MAX(chart_date) AS latest FROM analytics_records WHERE {where_clause}",
+            f"SELECT MIN(chart_date) AS earliest, MAX(chart_date) AS latest FROM {self.analytics_table(chart_type)} WHERE {where_clause}",
             params,
         ).fetchone()
         return {
@@ -1050,7 +1140,7 @@ class DatabaseManager:
                 SELECT chart_date, MIN(weekly_start) AS weekly_start,
                        MAX(weekly_end) AS weekly_end, SUM(streams) AS streams,
                        MIN(observed_days) AS observed_days
-                FROM analytics_records
+                FROM {self.analytics_table(chart_type)}
                 WHERE {" AND ".join(filters)}
                 GROUP BY chart_date
                 ORDER BY chart_date
@@ -1179,7 +1269,7 @@ class DatabaseManager:
                     MIN(chart_date) AS first_appearance,
                     MAX(chart_date) AS latest_appearance,
                     COUNT(DISTINCT chart_date) AS observed_dates
-                FROM analytics_records
+                FROM {self.analytics_table(chart_type)}
                 WHERE {where_clause}
                 GROUP BY track_key
             """,

@@ -2,7 +2,7 @@
 
 An independent local Windows desktop application for analyzing user-supplied US music chart CSV/XLSX observations. Metrics are derived only from imported rows; they are not official platform totals and do not imply complete historical coverage. The application is not affiliated with or endorsed by Spotify.
 
-Current source: **0.1.8 feature restoration** on `recovery/v018-feature-restoration`. [Partial local weekly/metadata integration](docs/LOCAL_DATA_INTEGRATION.md) is available through `scripts/run_integrated.ps1`; complete historical coverage and packaged verification remain pending. No new executable, installer, or client ZIP is produced. See the [supported data schema](docs/SUPPORTED_DATA_SCHEMA.md). Earlier release acceptance and handover documents describe the previous source and are retained as historical references.
+Current source: **0.1.8** on `recovery/v018-feature-restoration`. [Historical integration](docs/LOCAL_DATA_INTEGRATION.md) now includes 721,171 US daily song observations, 12,599 source-weekly song observations and separate album positions, artist positions and listener snapshots. One Windows distribution, installer and **INTERNAL-READY** handover ZIP are produced under `local-data/v018-work/release`; external dataset distribution authorization is unestablished. See the [current installation guide](docs/V018_INSTALLATION_GUIDE.md), [user guide](docs/V018_USER_GUIDE.md), [coverage](docs/V018_DATA_COVERAGE.md) and [supported schema](docs/SUPPORTED_DATA_SCHEMA.md). Earlier release acceptance/handover documents remain historical references, not the current delivery status.
 
 ## Setup
 
@@ -28,7 +28,7 @@ On a 64-bit Windows machine with the dependencies installed:
 .\scripts\build_windows.ps1
 ```
 
-The script runs the test suite and syntax compilation, generates the original application icon and version resource, builds a windowed PyInstaller onedir application, launches an offscreen packaged-app smoke test, and records a SHA-256 hash. Output is written to `dist\USMusicChartsAnalytics\`. Build/test datasets, databases, and temporary output are not bundled.
+The general development script runs the test suite and syntax compilation, generates the original application icon and version resource, builds a windowed PyInstaller onedir application, launches an offscreen packaged-app smoke test, and records a SHA-256 hash. Output is written to `dist\USMusicChartsAnalytics\`. It does not select a release seed automatically. The storage-constrained 0.1.8 release instead used focused tests and the same spec with `SPOTIFY_RELEASE_WORK`, `SPOTIFY_RELEASE_SEED` and `SPOTIFY_COMPLIANCE`, plus explicit D: work/dist/temp/cache paths. Only the checked historical seed is bundled; raw CSVs, test fixtures and temporary databases are not.
 
 To create the per-user installer, install Inno Setup 6 from [jrsoftware.org/isinfo.php](https://jrsoftware.org/isinfo.php), then run:
 

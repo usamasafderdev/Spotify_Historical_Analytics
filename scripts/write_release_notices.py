@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 import shutil
 import sys
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
-DESTINATION = ROOT / "build" / "release-notices"
+DESTINATION = Path(os.environ.get("SPOTIFY_RELEASE_WORK", ROOT / "build")) / "release-notices"
 PACKAGES = ["PySide6", "PySide6-Essentials", "PySide6-Addons", "shiboken6", "pyqtgraph",
             "pandas", "numpy", "openpyxl", "et-xmlfile", "python-dateutil", "pytz", "tzdata", "six", "packaging", "PyInstaller"]
 

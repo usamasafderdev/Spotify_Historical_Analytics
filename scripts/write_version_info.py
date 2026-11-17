@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT_PATH = ROOT / "src" / "spotify_historical_analytics" / "__init__.py"
-OUTPUT_PATH = ROOT / "build" / "version_info.txt"
+OUTPUT_PATH = Path(os.environ.get("SPOTIFY_RELEASE_WORK", ROOT / "build")) / "version_info.txt"
 
 
 def main() -> None:
@@ -51,7 +52,7 @@ def main() -> None:
 '''
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(content, encoding="utf-8")
-    (ROOT / "build" / "version.txt").write_text(version + "\n", encoding="ascii")
+    (OUTPUT_PATH.parent / "version.txt").write_text(version + "\n", encoding="ascii")
     print(f"Generated Windows version metadata for {version}")
 
 

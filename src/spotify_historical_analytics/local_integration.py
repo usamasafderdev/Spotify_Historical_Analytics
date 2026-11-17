@@ -27,6 +27,22 @@ TEMP_LIMIT = 3 * 1024**3
 METADATA_FILES = {"artists.csv": "artist", "albums.csv": "album", "songs.csv": "track",
                   "artwork.csv": "artwork", "links.csv": "links"}
 WEEKLY_COLUMNS = {"cc", "week_end", "rank", "streams", "track_id", "title", "artists", "artist_uris"}
+DAILY_CHART_COLUMNS = {"title", "rank", "date", "artist", "url", "region", "chart", "trend", "streams"}
+
+
+class HashingReader(io.RawIOBase):
+    def __init__(self, source, digest):
+        self._source = source
+        self._digest = digest
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        data = self._source.read(len(buffer))
+        self._digest.update(data)
+        buffer[:len(data)] = data
+        return len(data)
 
 
 def spotify_id(value: str, kind: str) -> str | None:
@@ -81,6 +97,22 @@ def initialize(db: DatabaseManager) -> None:
             path TEXT PRIMARY KEY, size_bytes INTEGER, modified_ns INTEGER, sha256 TEXT,
             category TEXT, status TEXT, result_json TEXT, updated_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS integration_progress (path TEXT PRIMARY KEY, result_json TEXT);
+        CREATE TABLE IF NOT EXISTS integration_conflicts (
+            source_path TEXT, chart_type TEXT, chart_date TEXT, track_id TEXT,
+            established_streams INTEGER, incoming_streams INTEGER,
+            established_position INTEGER, incoming_position INTEGER,
+            established_title TEXT, incoming_title TEXT, established_credits TEXT, incoming_credits TEXT,
+            PRIMARY KEY(source_path,chart_type,chart_date,track_id)
+        );
+        CREATE TABLE IF NOT EXISTS integration_slot_conflicts (
+            source_path TEXT, chart_type TEXT, chart_date TEXT, position INTEGER,
+            established_track_id TEXT, incoming_track_id TEXT,
+            established_streams INTEGER, incoming_streams INTEGER,
+            established_title TEXT, incoming_title TEXT,
+            established_credits TEXT, incoming_credits TEXT,
+            PRIMARY KEY(source_path,chart_type,chart_date,position,incoming_track_id)
+        );
         CREATE TABLE IF NOT EXISTS entity_metadata (
             entity_type TEXT, entity_id TEXT, source_path TEXT, payload_json TEXT, payload_sha256 TEXT,
             PRIMARY KEY(entity_type, entity_id, source_path, payload_sha256)
@@ -94,7 +126,9 @@ def initialize(db: DatabaseManager) -> None:
             PRIMARY KEY(album_id, artist_id)
         );
         CREATE INDEX IF NOT EXISTS idx_chart_records_identity
-            ON chart_records(country, chart_type, chart_date, track_id);
+            ON chart_records(country, chart_type, chart_date, track_id, source);
+        CREATE INDEX IF NOT EXISTS idx_chart_records_slot
+            ON chart_records(country, chart_type, chart_date, position, track_id);
         CREATE TEMP TABLE IF NOT EXISTS integration_metadata (
             entity_id TEXT, name TEXT, credits TEXT, release_date TEXT, payload TEXT, payload_sha256 TEXT
         );
@@ -104,7 +138,14 @@ def initialize(db: DatabaseManager) -> None:
         );
         CREATE TEMP TABLE IF NOT EXISTS integration_chart (
             track_id TEXT, chart_date TEXT, weekly_start TEXT, weekly_end TEXT,
-            position INTEGER, track_name TEXT, artist_names TEXT, streams INTEGER, conflict INTEGER DEFAULT 0
+            position INTEGER, track_name TEXT, artist_names TEXT, streams INTEGER,
+            original_url TEXT, conflict INTEGER DEFAULT 0
+        );
+        CREATE TEMP TABLE IF NOT EXISTS integration_artist_chart (
+            country TEXT, chart_date TEXT, position INTEGER, artist_id TEXT, artist_name TEXT,
+            peak_rank INTEGER, previous_rank INTEGER, days_on_chart INTEGER, consecutive_days INTEGER,
+            entry_status TEXT, peak_date TEXT, entry_rank INTEGER, entry_date TEXT,
+            conflict INTEGER DEFAULT 0
         );
         CREATE TEMP TABLE IF NOT EXISTS integration_album_chart (
             country TEXT, chart_date TEXT, weekly_start TEXT, weekly_end TEXT,
@@ -212,31 +253,62 @@ def import_metadata(db, path, category, reader, result):
         flush_metadata(db, path, category, rows, relationships, references, result)
 
 
-def flush_chart(db, batch, rows, relationships, result):
+def flush_chart(db, batch, rows, relationships, result, chart_type="weekly"):
     connection = db.connection
     connection.execute("DELETE FROM integration_chart")
-    connection.executemany("INSERT INTO integration_chart(track_id,chart_date,weekly_start,weekly_end,position,track_name,artist_names,streams) VALUES (?,?,?,?,?,?,?,?)", rows)
+    connection.executemany("INSERT INTO integration_chart(track_id,chart_date,weekly_start,weekly_end,position,track_name,artist_names,streams,original_url) VALUES (?,?,?,?,?,?,?,?,?)", rows)
     connection.execute("""UPDATE integration_chart SET conflict=1 WHERE (track_id,chart_date) IN (
         SELECT track_id,chart_date FROM integration_chart GROUP BY track_id,chart_date
         HAVING COUNT(DISTINCT streams)>1 OR COUNT(DISTINCT position)>1 OR COUNT(DISTINCT track_name)>1 OR COUNT(DISTINCT artist_names)>1
     ) OR EXISTS (SELECT 1 FROM chart_records existing
-        WHERE existing.country='US' AND existing.chart_type='weekly' AND existing.source <> 'DEMO / SYNTHETIC'
+        WHERE existing.country='US' AND existing.chart_type=? AND existing.source <> 'DEMO / SYNTHETIC'
           AND existing.track_id=integration_chart.track_id AND existing.chart_date=integration_chart.chart_date
           AND (existing.streams != integration_chart.streams OR existing.position IS NOT integration_chart.position
                OR existing.track_name != integration_chart.track_name OR existing.artist_names != integration_chart.artist_names
-               OR existing.weekly_start IS NOT integration_chart.weekly_start OR existing.weekly_end IS NOT integration_chart.weekly_end))""")
+               OR existing.weekly_start IS NOT integration_chart.weekly_start OR existing.weekly_end IS NOT integration_chart.weekly_end))""",
+        (chart_type,))
+    if chart_type == "daily" and result.get("source_path"):
+        slot_conflicts = insert_count(connection, """INSERT OR IGNORE INTO integration_slot_conflicts
+            SELECT ?,?,incoming.chart_date,incoming.position,existing.track_id,incoming.track_id,
+                   existing.streams,incoming.streams,existing.track_name,incoming.track_name,
+                   existing.artist_names,incoming.artist_names
+            FROM integration_chart incoming CROSS JOIN chart_records existing INDEXED BY idx_chart_records_slot
+            WHERE incoming.conflict=0 AND existing.country='US' AND existing.chart_type=?
+              AND existing.chart_date=incoming.chart_date AND existing.position=incoming.position
+              AND existing.source<>'DEMO / SYNTHETIC' AND existing.batch_id<>?
+              AND existing.track_id<>incoming.track_id
+              AND NOT EXISTS (SELECT 1 FROM chart_records identity INDEXED BY idx_chart_records_identity
+                  WHERE identity.country='US' AND identity.chart_type=? AND identity.chart_date=incoming.chart_date
+                    AND identity.track_id=incoming.track_id AND identity.source<>'DEMO / SYNTHETIC')""",
+            (result["source_path"], chart_type, chart_type, batch, chart_type))
+        result["slot_conflicts"] = result.get("slot_conflicts", 0) + slot_conflicts
+        connection.execute("""UPDATE integration_chart SET conflict=1 WHERE EXISTS (
+            SELECT 1 FROM integration_slot_conflicts conflict
+            WHERE conflict.source_path=? AND conflict.chart_type=?
+              AND conflict.chart_date=integration_chart.chart_date
+              AND conflict.incoming_track_id=integration_chart.track_id)""", (result["source_path"], chart_type))
     conflicts = connection.execute("SELECT track_id,chart_date FROM integration_chart WHERE conflict=1").fetchall()
     result["conflicts"] += len(conflicts)
+    if result.get("source_path"):
+        connection.execute("""INSERT OR IGNORE INTO integration_conflicts
+            SELECT ?,?,incoming.chart_date,incoming.track_id,existing.streams,incoming.streams,
+                   existing.position,incoming.position,existing.track_name,incoming.track_name,
+                   existing.artist_names,incoming.artist_names
+            FROM integration_chart incoming CROSS JOIN chart_records existing INDEXED BY idx_chart_records_identity
+              ON existing.track_id=incoming.track_id AND existing.chart_date=incoming.chart_date
+             AND existing.country='US' AND existing.chart_type=?
+            WHERE incoming.conflict=1""", (result["source_path"], chart_type, chart_type))
     for row in conflicts[:max(0, 8 - len(result["conflict_examples"]))]:
         result["conflict_examples"].append(f"{row[0]}@{row[1]}")
     added = insert_count(connection, """INSERT OR IGNORE INTO chart_records(
-        batch_id,source,source_license,chart_type,country,chart_date,weekly_start,weekly_end,position,track_id,track_name,artist_names,streams)
-        SELECT DISTINCT ?,?,?,'weekly','US',incoming.chart_date,incoming.weekly_start,incoming.weekly_end,
+        batch_id,source,source_license,chart_type,country,chart_date,weekly_start,weekly_end,position,track_id,track_name,artist_names,streams,original_url)
+        SELECT DISTINCT ?,?,?,?,'US',incoming.chart_date,incoming.weekly_start,incoming.weekly_end,
             incoming.position,incoming.track_id,incoming.track_name,incoming.artist_names,incoming.streams
+            ,incoming.original_url
         FROM integration_chart incoming WHERE conflict=0 AND NOT EXISTS (
-            SELECT 1 FROM chart_records existing WHERE existing.country='US' AND existing.chart_type='weekly'
+            SELECT 1 FROM chart_records existing INDEXED BY idx_chart_records_identity WHERE existing.country='US' AND existing.chart_type=?
             AND existing.source <> 'DEMO / SYNTHETIC' AND existing.track_id=incoming.track_id AND existing.chart_date=incoming.chart_date
-        )""", (batch, SOURCE, SOURCE_NOTE))
+        )""", (batch, SOURCE, SOURCE_NOTE, chart_type, chart_type))
     result["imported_rows"] += added
     result["duplicates"] += len(rows) - len(conflicts) - added
     connection.execute("INSERT OR IGNORE INTO tracks(track_id,track_name,artist_names,source) SELECT track_id,MIN(track_name),MIN(artist_names),? FROM integration_chart WHERE conflict=0 GROUP BY track_id", (SOURCE,))
@@ -245,6 +317,222 @@ def flush_chart(db, batch, rows, relationships, result):
     connection.execute("INSERT OR IGNORE INTO artists(artist_id,source_name,source_license) SELECT DISTINCT artist_id,?,? FROM integration_artists WHERE entity_id IN (SELECT track_id FROM integration_chart WHERE conflict=0)", (SOURCE, SOURCE_NOTE))
     result["track_artist_links"] += insert_count(connection, "INSERT OR IGNORE INTO track_artists(track_id,artist_id,attribution_rule,mapping_status,metadata_batch_id) SELECT DISTINCT entity_id,artist_id,'full-credit','id_match',? FROM integration_artists WHERE entity_id IN (SELECT track_id FROM integration_chart WHERE conflict=0)", (batch,))
     check_space(db)
+    if result.get("incremental_batches"):
+        connection.execute("INSERT OR REPLACE INTO integration_progress VALUES (?,?)", (result["source_path"], json.dumps(result)))
+        connection.commit()
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.execute("BEGIN IMMEDIATE")
+
+
+def import_native_daily_songs(db, reader, result):
+    required = {"date", "country", "rank", "uri", "artist_names", "track_name", "streams", "artist_uris"}
+    if not required.issubset(reader.fieldnames or []):
+        raise ValueError("Native daily song schema is not recognized")
+    batch = db.create_batch(SOURCE, SOURCE_NOTE, "daily", "US")
+    result["batch_id"] = batch
+    mapping = {"date": "date", "country": "country", "position": "rank", "track_name": "track_name",
+               "artist_names": "artist_names", "track_id": "_track_id", "streams": "streams", "url": "uri"}
+    rows, relationships = [], []
+    countries, dates, tracks = {}, set(), set()
+    for raw in reader:
+        result["scanned_rows"] += 1
+        if result["scanned_rows"] % 2000000 == 0:
+            print(json.dumps({"progress": result["source_path"], "rows": result["scanned_rows"], "imported": result["imported_rows"]}), flush=True)
+        country = raw.get("country", "")
+        countries[country] = countries.get(country, 0) + 1
+        if country.casefold() not in {"us", "usa", "united states"}:
+            result["excluded_non_us"] += 1
+            continue
+        raw["_track_id"] = spotify_id(raw.get("uri", ""), "track") or ""
+        record, reason = ImportSessionStore._normalize_row(raw, mapping, "daily")
+        if record is None or not raw["_track_id"] or not record["position"]:
+            result["invalid_rows"] += 1
+            continue
+        try:
+            supplied_artists = artist_ids(raw.get("artist_uris", ""))
+        except ValueError:
+            supplied_artists = []
+            result["invalid_artist_relationships"] = result.get("invalid_artist_relationships", 0) + 1
+        rows.append(tuple(record[key] for key in ("track_id", "chart_date", "weekly_start", "weekly_end", "position", "track_name", "artist_names", "streams", "original_url")))
+        relationships.extend((record["track_id"], artist) for artist in supplied_artists)
+        dates.add(record["chart_date"])
+        tracks.add(record["track_id"])
+        result["earliest"] = min(result["earliest"] or record["chart_date"], record["chart_date"])
+        result["latest"] = max(result["latest"] or record["chart_date"], record["chart_date"])
+        if len(rows) >= BATCH_SIZE:
+            flush_chart(db, batch, rows, relationships, result, "daily")
+            rows, relationships = [], []
+    if rows:
+        flush_chart(db, batch, rows, relationships, result, "daily")
+    result.update(country_coverage=countries, observed_dates=len(dates), unique_track_ids=len(tracks))
+
+
+def import_daily_song_charts(db, reader, result):
+    if not DAILY_CHART_COLUMNS.issubset(reader.fieldnames or []):
+        raise ValueError("Daily song chart source schema is not recognized")
+    batch = db.create_batch(SOURCE, SOURCE_NOTE, "daily", "US")
+    result["batch_id"] = batch
+    mapping = {
+        "date": "date", "country": "region", "position": "rank",
+        "track_name": "title", "artist_names": "artist", "streams": "streams",
+        "chart_type": "chart", "url": "url",
+    }
+    rows = []
+    track_ids = set()
+    dates = set()
+    country_cache = {}
+    for raw in reader:
+        result["scanned_rows"] += 1
+        if result["scanned_rows"] % 2000000 == 0:
+            print(json.dumps({"progress": result.get("source_path"), "rows": result["scanned_rows"], "imported": result["imported_rows"]}), flush=True)
+        if (raw.get("chart") or "").strip().casefold() != "top200":
+            result["excluded_other_chart"] += 1
+            continue
+        region = raw.get("region")
+        if region not in country_cache:
+            country_cache[region] = DatabaseManager.normalize_country(region)
+        if country_cache[region] != "US":
+            result["excluded_non_us"] += 1
+            continue
+        record, reason = ImportSessionStore._normalize_row(raw, mapping, "daily")
+        if record is None:
+            result["invalid_rows"] += 1
+            continue
+        rows.append(tuple(record[key] for key in (
+            "track_id", "chart_date", "weekly_start", "weekly_end", "position",
+            "track_name", "artist_names", "streams", "original_url",
+        )))
+        track_ids.add(record["track_id"])
+        dates.add(record["chart_date"])
+        result["earliest"] = min(result["earliest"] or record["chart_date"], record["chart_date"])
+        result["latest"] = max(result["latest"] or record["chart_date"], record["chart_date"])
+        if len(rows) >= BATCH_SIZE:
+            flush_chart(db, batch, rows, [], result, chart_type="daily")
+            rows = []
+    if rows:
+        flush_chart(db, batch, rows, [], result, chart_type="daily")
+    result["unique_track_ids"] = len(track_ids)
+    result["observed_dates"] = len(dates)
+
+
+def flush_artist_chart(db, batch, rows, result):
+    connection = db.connection
+    connection.execute("DELETE FROM integration_artist_chart")
+    connection.executemany(
+        """INSERT INTO integration_artist_chart(
+               country,chart_date,position,artist_id,artist_name,peak_rank,previous_rank,
+               days_on_chart,consecutive_days,entry_status,peak_date,entry_rank,entry_date
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        rows,
+    )
+    connection.execute("""UPDATE integration_artist_chart SET conflict=1 WHERE (country,chart_date,artist_id) IN (
+        SELECT country,chart_date,artist_id FROM integration_artist_chart
+        GROUP BY country,chart_date,artist_id
+        HAVING COUNT(DISTINCT position)>1 OR COUNT(DISTINCT artist_name)>1
+            OR COUNT(DISTINCT COALESCE(peak_rank,-999))>1
+            OR COUNT(DISTINCT COALESCE(previous_rank,-999))>1
+            OR COUNT(DISTINCT COALESCE(days_on_chart,-999))>1
+            OR COUNT(DISTINCT COALESCE(consecutive_days,-999))>1
+            OR COUNT(DISTINCT COALESCE(entry_status,''))>1
+            OR COUNT(DISTINCT COALESCE(peak_date,''))>1
+            OR COUNT(DISTINCT COALESCE(entry_rank,-999))>1
+            OR COUNT(DISTINCT COALESCE(entry_date,''))>1
+    ) OR EXISTS (SELECT 1 FROM artist_chart_records existing
+        WHERE existing.country=integration_artist_chart.country
+          AND existing.chart_type='daily'
+          AND existing.chart_date=integration_artist_chart.chart_date
+          AND existing.artist_id=integration_artist_chart.artist_id
+          AND (existing.position IS NOT integration_artist_chart.position
+               OR existing.artist_name IS NOT integration_artist_chart.artist_name
+               OR existing.peak_rank IS NOT integration_artist_chart.peak_rank
+               OR existing.previous_rank IS NOT integration_artist_chart.previous_rank
+               OR existing.days_on_chart IS NOT integration_artist_chart.days_on_chart
+               OR existing.consecutive_days IS NOT integration_artist_chart.consecutive_days
+               OR existing.entry_status IS NOT integration_artist_chart.entry_status
+               OR existing.peak_date IS NOT integration_artist_chart.peak_date
+               OR existing.entry_rank IS NOT integration_artist_chart.entry_rank
+               OR existing.entry_date IS NOT integration_artist_chart.entry_date))""")
+    conflicts = connection.execute(
+        "SELECT COUNT(*) FROM integration_artist_chart WHERE conflict=1"
+    ).fetchone()[0]
+    result["conflicts"] += conflicts
+    added = insert_count(connection, """INSERT OR IGNORE INTO artist_chart_records(
+        batch_id,source,source_license,chart_type,country,chart_date,position,artist_id,artist_name,
+        peak_rank,previous_rank,days_on_chart,consecutive_days,entry_status,peak_date,entry_rank,entry_date)
+        SELECT DISTINCT ?,?,?,'daily',incoming.country,incoming.chart_date,incoming.position,
+            incoming.artist_id,incoming.artist_name,incoming.peak_rank,incoming.previous_rank,
+            incoming.days_on_chart,incoming.consecutive_days,incoming.entry_status,incoming.peak_date,
+            incoming.entry_rank,incoming.entry_date
+        FROM integration_artist_chart incoming
+        WHERE incoming.conflict=0 AND NOT EXISTS (
+            SELECT 1 FROM artist_chart_records existing
+            WHERE existing.country=incoming.country AND existing.chart_type='daily'
+              AND existing.chart_date=incoming.chart_date AND existing.artist_id=incoming.artist_id
+        )""", (batch, SOURCE, SOURCE_NOTE))
+    result["imported_rows"] += added
+    result["artist_chart_records_added"] += added
+    result["duplicates"] += len(rows) - conflicts - added
+    check_space(db)
+
+
+def import_daily_artist_charts(db, reader, result):
+    required = {"date", "country", "rank", "uri", "artist_name"}
+    if not required.issubset(reader.fieldnames or []):
+        raise ValueError("Daily artist chart source schema is not recognized")
+    batch = db.create_batch(SOURCE, SOURCE_NOTE, "daily_artist", "US")
+    rows = []
+    artist_ids_seen = set()
+    dates = set()
+    optional_numeric = ("peak_rank", "previous_rank", "days_on_chart", "consecutive_days", "entry_rank")
+    optional_dates = ("peak_date", "entry_date")
+    for raw in reader:
+        result["scanned_rows"] += 1
+        if DatabaseManager.normalize_country(raw.get("country")) != "US":
+            result["excluded_non_us"] += 1
+            continue
+        try:
+            chart_date = date.fromisoformat(raw["date"])
+            artist_id = spotify_id(raw["uri"], "artist")
+            position = int(raw["rank"])
+            artist_name = raw["artist_name"].strip()
+            if (chart_date.isoformat() != raw["date"] or not artist_id
+                    or position < 1 or not artist_name):
+                raise ValueError("Invalid US artist chart identity, date, or position")
+            metrics = []
+            for field in optional_numeric:
+                value = raw.get(field, "")
+                metric = int(value) if value else None
+                if metric is not None and (metric < -1 if field == "previous_rank" else metric < 1):
+                    raise ValueError(f"Invalid artist chart metric: {field}")
+                metrics.append(metric)
+            metric_dates = []
+            for field in optional_dates:
+                value = raw.get(field, "")
+                parsed = date.fromisoformat(value) if value else None
+                if parsed and parsed.isoformat() != value:
+                    raise ValueError(f"Invalid artist chart metric date: {field}")
+                metric_dates.append(parsed.isoformat() if parsed else None)
+            rows.append((
+                "US", chart_date.isoformat(), position, artist_id, artist_name,
+                metrics[0], metrics[1], metrics[2], metrics[3],
+                (raw.get("entry_status") or "").strip() or None,
+                metric_dates[0], metrics[4], metric_dates[1],
+            ))
+            artist_ids_seen.add(artist_id)
+            dates.add(chart_date.isoformat())
+            result["earliest"] = min(result["earliest"] or chart_date.isoformat(), chart_date.isoformat())
+            result["latest"] = max(result["latest"] or chart_date.isoformat(), chart_date.isoformat())
+        except (KeyError, ValueError):
+            result["invalid_rows"] += 1
+        if len(rows) >= BATCH_SIZE:
+            flush_artist_chart(db, batch, rows, result)
+            rows = []
+    if rows:
+        flush_artist_chart(db, batch, rows, result)
+    known_artist_ids = {row[0] for row in db.connection.execute("SELECT artist_id FROM artists")}
+    result["unique_artist_ids"] = len(artist_ids_seen)
+    result["artist_ids_matching_metadata"] = len(artist_ids_seen & known_artist_ids)
+    result["observed_dates"] = len(dates)
 
 
 def flush_album_chart(db, batch, rows, result):
@@ -424,7 +712,10 @@ def import_weekly(db, reader, result):
             if record is None or not spotify_id(record["track_id"], "track") or end.weekday() != 3 or not record["position"]:
                 raise ValueError(reason or "Invalid weekly identity, position, or reporting end")
             supplied_artists = artist_ids(raw["artist_uris"])
-            rows.append(tuple(record[key] for key in ("track_id", "chart_date", "weekly_start", "weekly_end", "position", "track_name", "artist_names", "streams")))
+            rows.append(tuple(record[key] for key in (
+                "track_id", "chart_date", "weekly_start", "weekly_end", "position",
+                "track_name", "artist_names", "streams", "original_url",
+            )))
             relationships.extend((record["track_id"], artist) for artist in supplied_artists)
             result["earliest"] = min(result["earliest"] or record["chart_date"], record["chart_date"])
             result["latest"] = max(result["latest"] or record["chart_date"], record["chart_date"])
@@ -446,20 +737,36 @@ def integrate_file(db: DatabaseManager, path: Path, category: str) -> dict:
               "invalid_rows": 0, "excluded_non_us": 0, "entities_added": 0, "references_added": 0,
               "track_artist_links": 0, "album_artist_links": 0, "earliest": None, "latest": None,
               "conflict_examples": []}
+    result["source_path"] = str(path.resolve())
+    result["incremental_batches"] = category in {"native_song_daily", "chart_csv_daily"} and stat.st_size > 128 * 1024**2
     if category == "album_weekly":
         result["album_records_added"] = 0
         result["stream_column_present"] = False
     elif category == "artist_listener_metrics":
         result["listener_records_added"] = 0
+    elif category == "chart_csv_daily":
+        result["excluded_other_chart"] = 0
+        result["stream_column_present"] = True
+        result["unique_track_ids"] = 0
+        result["observed_dates"] = 0
+    elif category == "artist_chart_daily":
+        result["artist_chart_records_added"] = 0
+        result["unique_artist_ids"] = 0
+        result["artist_ids_matching_metadata"] = 0
+        result["observed_dates"] = 0
     with db.transaction():
         with locked_source(path) as (binary, initial):
             digest = hashlib.sha256()
-            for block in iter(lambda: binary.read(1024 * 1024), b""):
-                digest.update(block)
-            binary.seek(0)
-            decoded = gzip.GzipFile(fileobj=binary) if path.name.endswith(".gz") else binary
+            if path.name.endswith(".gz"):
+                for block in iter(lambda: binary.read(1024 * 1024), b""):
+                    digest.update(block)
+                binary.seek(0)
+                decoded = gzip.GzipFile(fileobj=binary)
+            else:
+                decoded = io.BufferedReader(HashingReader(binary, digest))
             text = io.TextIOWrapper(decoded, encoding="utf-8-sig", newline="")
             reader = csv.DictReader(text)
+            result["schema_fingerprint"] = hashlib.sha256(json.dumps(reader.fieldnames).encode()).hexdigest()
             db.ensure_source(SOURCE, SOURCE_NOTE)
             if category == "weekly":
                 import_weekly(db, reader, result)
@@ -467,10 +774,17 @@ def integrate_file(db: DatabaseManager, path: Path, category: str) -> dict:
                 import_album_weekly(db, reader, result)
             elif category == "artist_listener_metrics":
                 import_artist_listener_metrics(db, reader, result)
+            elif category == "chart_csv_daily":
+                import_daily_song_charts(db, reader, result)
+            elif category == "native_song_daily":
+                import_native_daily_songs(db, reader, result)
+            elif category == "artist_chart_daily":
+                import_daily_artist_charts(db, reader, result)
             else:
                 import_metadata(db, path, category, reader, result)
             db.connection.execute("INSERT OR REPLACE INTO integration_files(path,size_bytes,modified_ns,sha256,category,status,result_json) VALUES (?,?,?,?,?,'complete',?)",
                                   (str(path.resolve()), initial.st_size, initial.st_mtime_ns, digest.hexdigest(), category, json.dumps(result)))
+            db.connection.execute("DELETE FROM integration_progress WHERE path=?", (str(path.resolve()),))
     db.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     return {"file": path.name, "status": "complete", **result}
 
@@ -490,6 +804,7 @@ def main() -> int:
     db = DatabaseManager(db_path)
     try:
         initialize(db)
+        check_space(db)
         skipped = []
         candidates_to_import = []
         for filename, category in METADATA_FILES.items():
@@ -500,12 +815,17 @@ def main() -> int:
         for path in sorted(options.downloads.glob("spotify_top200_positions_*.csv.gz")):
             candidates_to_import.append((path, "weekly"))
         for filename, category in (
+            ("charts_songs_daily.csv", "native_song_daily"),
             ("charts_albums_weekly.csv", "album_weekly"),
             ("artist_listeners_daily.csv", "artist_listener_metrics"),
+            ("charts_artists_daily.csv", "artist_chart_daily"),
         ):
             path = options.downloads / filename
             if path.is_file():
                 candidates_to_import.append((path, category))
+        song_charts = options.downloads / "charts.csv" / "charts.csv"
+        if song_charts.is_file():
+            candidates_to_import.append((song_charts, "chart_csv_daily"))
         for path, category in candidates_to_import:
             try:
                 print(json.dumps(integrate_file(db, path, category)), flush=True)

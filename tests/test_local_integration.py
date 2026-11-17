@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from datetime import date, timedelta
 import gzip
+import hashlib
 import json
 import os
 import time
@@ -58,6 +59,20 @@ def weekly(path, rows):
 
 def album_weekly(path, rows):
     return write_source(path, ["date", "country", "rank", "uri", "album_name", "artist_names"], rows)
+
+
+def song_charts(path, rows):
+    headers = ["title", "rank", "date", "artist", "url", "region", "chart", "trend", "streams"]
+    return write_source(path, headers, rows)
+
+
+def artist_daily(path, rows):
+    headers = [
+        "date", "country", "rank", "uri", "artist_name", "peak_rank", "previous_rank",
+        "days_on_chart", "consecutive_days", "entry_status", "peak_date", "entry_rank",
+        "entry_date",
+    ]
+    return write_source(path, headers, rows)
 
 
 def observation(streams=100, country="us", end="2024-02-08", position=1, track=TRACK):
@@ -144,6 +159,94 @@ def test_artist_listener_metrics_are_separate_and_conflicts_preserve_existing(db
     assert db.get_artist_listener_history(ARTIST) == [{"date": "2024-02-08", "listeners": 1000}]
 
 
+def test_daily_top200_import_keeps_verified_tracks_and_streams_separate(db, tmp_path):
+    second_track = "D" * 22
+    path = song_charts(tmp_path / "charts.csv", [
+        ["TEST DATA Song", 1, "2024-02-08", "TEST DATA Artist", "https://open.spotify.com/track/" + TRACK, "United States", "top200", "SAME_POSITION", 1000],
+        ["TEST DATA Song", 1, "2024-02-08", "TEST DATA Artist", "https://open.spotify.com/track/" + TRACK, "United States", "top200", "SAME_POSITION", 1000],
+        ["TEST DATA Song", 1, "2024-02-08", "TEST DATA Artist", "https://open.spotify.com/track/" + TRACK, "United States", "top200", "SAME_POSITION", 1001],
+        ["TEST DATA Song Two", 2, "2024-02-08", "Other Artist", "https://open.spotify.com/track/" + second_track, "United States", "top200", "NEW_ENTRY", 500],
+        ["TEST DATA Song Two", 2, "2024-02-08", "Other Artist", "https://open.spotify.com/track/" + second_track, "United States", "top200", "NEW_ENTRY", 500],
+        ["Viral Song", 1, "2024-02-08", "Viral Artist", "https://open.spotify.com/track/" + ("E" * 22), "United States", "viral50", "NEW_ENTRY", 50],
+        ["Canada Song", 1, "2024-02-08", "Canada Artist", "https://open.spotify.com/track/" + ("F" * 22), "Canada", "top200", "NEW_ENTRY", 75],
+    ])
+
+    result = integrate_file(db, path, "chart_csv_daily")
+
+    assert result["imported_rows"] == 1
+    stored_hash = db.connection.execute(
+        "SELECT sha256 FROM integration_files WHERE path=?", (str(path.resolve()),)
+    ).fetchone()[0]
+    assert stored_hash == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert result["duplicates"] == 1
+    assert result["conflicts"] == 3
+    assert result["excluded_other_chart"] == 1
+    assert result["excluded_non_us"] == 1
+    assert result["stream_column_present"] is True
+    assert db.connection.execute("SELECT COUNT(*) FROM chart_records").fetchone()[0] == 1
+    row = db.connection.execute("SELECT chart_type,track_id,streams,original_url FROM chart_records").fetchone()
+    assert tuple(row) == ("daily", second_track, 500, "https://open.spotify.com/track/" + second_track)
+    assert db.get_summary(chart_type="daily")["total_streams"] == 500
+    assert db.get_summary(chart_type="weekly")["total_streams"] == 0
+    assert db.connection.execute("SELECT COUNT(*) FROM track_artists").fetchone()[0] == 0
+
+
+def test_native_daily_songs_and_overlapping_source_preserve_established_values(db, tmp_path):
+    path = write_source(tmp_path / "charts_songs_daily.csv",
+        ["date", "country", "rank", "uri", "artist_names", "track_name", "streams", "artist_uris"], [
+            ["2024-02-08", "us", 1, "spotify:track:" + TRACK, "TEST DATA Artist", "TEST DATA Song", 1000, "spotify:artist:" + ARTIST],
+            ["2024-02-09", "us", 2, "spotify:track:" + TRACK, "TEST DATA Artist", "TEST DATA Song", 2000, "spotify:artist:" + ARTIST],
+            ["2024-02-08", "global", 1, "spotify:track:" + TRACK, "TEST DATA Artist", "TEST DATA Song", 999999, "spotify:artist:" + ARTIST],
+            ["2024-02-10", "us", 1, "spotify:track:" + TRACK, "TEST DATA Artist", "TEST DATA Song", -1, "spotify:artist:" + ARTIST],
+        ])
+    result = integrate_file(db, path, "native_song_daily")
+    assert result["imported_rows"] == 2
+    assert result["invalid_rows"] == result["excluded_non_us"] == 1
+    assert db.get_summary()["total_streams"] == 3000
+    assert db.get_summary(chart_type="weekly")["total_streams"] == 0
+    assert db.get_summary(chart_type="weekly_derived")["total_streams"] == 3000
+    assert db.get_top_tracks()[0]["chart_appearances"] == 2
+    overlap = song_charts(tmp_path / "overlap.csv", [
+        ["TEST DATA Song", 1, "2024-02-08", "TEST DATA Artist", "https://open.spotify.com/track/" + TRACK, "United States", "top200", "SAME_POSITION", 1000],
+        ["TEST DATA Song", 2, "2024-02-09", "TEST DATA Artist", "https://open.spotify.com/track/" + TRACK, "United States", "top200", "SAME_POSITION", 9999],
+        ["TEST DATA Song", 1, "2024-02-08", "TEST DATA Artist", "https://open.spotify.com/track/" + "Z" * 22, "United States", "top200", "SAME_POSITION", 1000],
+    ])
+    result = integrate_file(db, overlap, "chart_csv_daily")
+    assert result["duplicates"] == 1 and result["conflicts"] == 2
+    assert result["slot_conflicts"] == 1
+    assert db.connection.execute("SELECT incoming_track_id FROM integration_slot_conflicts").fetchone()[0] == "Z" * 22
+    assert db.get_summary()["total_streams"] == 3000
+    assert db.connection.execute("SELECT incoming_streams FROM integration_conflicts").fetchone()[0] == 9999
+
+
+def test_daily_artist_positions_are_separate_and_do_not_create_artist_links(db, tmp_path):
+    second_artist = "C" * 22
+    source_row = ["2024-02-08", "us", 1, "spotify:artist:" + ARTIST, "Chart Artist", 1, -1, 1, 1, "NEW_ENTRY", "2024-02-08", 1, "2024-02-08"]
+    changed_row = ["2024-02-08", "us", 2, "spotify:artist:" + ARTIST, "Chart Artist", 1, 1, 2, 1, "MOVED_DOWN", "2024-02-08", 1, "2024-02-08"]
+    other_row = ["2024-02-08", "us", 2, "spotify:artist:" + second_artist, "Other Chart Artist", 2, -1, 1, 1, "NEW_ENTRY", "2024-02-08", 2, "2024-02-08"]
+    path = artist_daily(tmp_path / "charts_artists_daily.csv", [
+        source_row, source_row, changed_row, other_row, other_row,
+        ["2024-02-08", "ca", 1, "spotify:artist:" + second_artist, "Other Chart Artist", 1, -1, 1, 1, "NEW_ENTRY", "2024-02-08", 1, "2024-02-08"],
+    ])
+    db.upsert_artist(ARTIST, "Existing Metadata Name")
+
+    result = integrate_file(db, path, "artist_chart_daily")
+
+    assert result["imported_rows"] == result["artist_chart_records_added"] == 1
+    assert result["duplicates"] == 1
+    assert result["conflicts"] == 3
+    assert result["excluded_non_us"] == 1
+    assert db.connection.execute("SELECT COUNT(*) FROM chart_records").fetchone()[0] == 0
+    assert db.connection.execute("SELECT COUNT(*) FROM track_artists").fetchone()[0] == 0
+    assert db.connection.execute(
+        "SELECT artist_name FROM artists WHERE artist_id=?", (ARTIST,)
+    ).fetchone()[0] == "Existing Metadata Name"
+    records = db.get_artist_chart_records(artist_id=second_artist)
+    assert [(row["artist_id"], row["position"], row["artist_name"]) for row in records] == [
+        (second_artist, 2, "Other Chart Artist")
+    ]
+
+
 def test_duplicates_conflicts_and_unchanged_manifest(db, tmp_path):
     first = weekly(tmp_path / "one.csv.gz", [observation(), observation()])
     result = integrate_file(db, first, "weekly")
@@ -214,6 +317,14 @@ def test_cli_manifest_integrates_album_charts_and_listener_metrics(tmp_path, mon
     ])
     write_source(downloads / "artist_listeners_daily.csv",
                  ["artist_id", "date", "listeners"], [[ARTIST, "2024-02-08", 99999]])
+    artist_daily(downloads / "charts_artists_daily.csv", [
+        ["2024-02-08", "us", 1, "spotify:artist:" + ARTIST, "TEST DATA Artist", 1, -1, 1, 1, "NEW_ENTRY", "2024-02-08", 1, "2024-02-08"],
+    ])
+    nested_charts = downloads / "charts.csv"
+    nested_charts.mkdir()
+    song_charts(nested_charts / "charts.csv", [
+        ["TEST DATA Song", 1, "2024-02-08", "TEST DATA Artist", "https://open.spotify.com/track/" + TRACK, "United States", "top200", "NEW_ENTRY", 100],
+    ])
     monkeypatch.setattr("sys.argv", ["integration", "--downloads", str(downloads), "--data-dir", str(target)])
     assert integration_main() == 0
 
@@ -223,9 +334,11 @@ def test_cli_manifest_integrates_album_charts_and_listener_metrics(tmp_path, mon
     monkeypatch.setattr("spotify_historical_analytics.local_integration.locked_source", unexpected_read)
     assert integration_main() == 0
     report = json.loads((target / "source-manifest.json").read_text())
-    assert len(report["files"]) == 3
+    assert len(report["files"]) == 5
     assert next(row for row in report["files"] if row["category"] == "artist_listener_metrics")["status"] == "complete"
     assert next(row for row in report["files"] if row["category"] == "album_weekly")["status"] == "complete"
+    assert next(row for row in report["files"] if row["category"] == "artist_chart_daily")["status"] == "complete"
+    assert next(row for row in report["files"] if row["category"] == "chart_csv_daily")["status"] == "complete"
 
 
 def test_cli_skips_recent_source_and_processes_other_completed_files(tmp_path, monkeypatch):

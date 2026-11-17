@@ -1,6 +1,6 @@
 # Supported historical data schema
 
-US Music Charts Analytics 0.1.8 development source. [Partial local weekly/metadata integration](LOCAL_DATA_INTEGRATION.md) is available in an isolated development database; complete historical coverage and packaged verification remain pending. This document describes the local-file importer, not the separate research pipeline.
+US Music Charts Analytics 0.1.8. The INTERNAL-READY release includes an isolated historical seed; see [local integration coverage](LOCAL_DATA_INTEGRATION.md) for its actual scope and authorization limitations. This document describes the local-file importer, not the separate research pipeline.
 
 ## Files and required columns
 
@@ -74,4 +74,4 @@ Expected chart-stream sum: **220**. Importing the unchanged file again under the
 
 These 22-character identifiers are invented TEST DATA, not verified Spotify entities. This example is **daily** and belongs in the general importer. To test the dedicated weekly importer, supply `chart_type=weekly` and explicit `weekly_start`/`weekly_end` (for example, `2024-02-02`/`2024-02-08`) with one observation dated inside that week; do not relabel daily observations as genuine weekly history.
 
-No historical dataset is bundled. Importing a file does not grant acquisition, commercial-use, analysis, export, or redistribution rights. The client must resolve source scope and permissions separately.
+The INTERNAL-READY seed and user-imported files do not grant acquisition, commercial-use, analysis, export, or redistribution rights. The release owner must resolve source scope and permissions separately before external delivery.

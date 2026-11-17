@@ -19,12 +19,21 @@ class AppearanceDialog(QDialog):
         layout = QVBoxLayout(self)
         note = QLabel(
             f"{category.title()} with known stable IDs only. One showing per entity and reporting date. "
-            "Artist/album streams come from mapped charting tracks; position is their best track position. "
+            "In track-derived mode, artist/album streams come from mapped charting tracks and position is their best track position. "
+            "Use Source to view separately supplied chart positions or listener snapshots. "
             "Rankings and full-history totals remain unchanged."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
         controls = QHBoxLayout()
+        self.source = QComboBox()
+        self.source.addItem("Track-derived chart streams", "track_streams")
+        if category == "albums":
+            self.source.addItem("US weekly album positions", "album_positions")
+        if category == "artists":
+            self.source.addItem("US daily artist positions", "artist_positions")
+            self.source.addItem("Artist listener snapshots (not streams)", "listeners")
+        controls.addWidget(self.source)
         self.hide_repeats = QCheckBox("Hide Repeats")
         self.hide_repeats.setChecked(hide_repeats)
         controls.addWidget(self.hide_repeats)
@@ -52,7 +61,19 @@ class AppearanceDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.hide_repeats.toggled.connect(self.refresh)
+        self.source.currentIndexChanged.connect(self._source_changed)
         self.sort.currentIndexChanged.connect(self.refresh)
+        self.refresh()
+
+    def _source_changed(self):
+        source = self.source.currentData()
+        self.sort.blockSignals(True)
+        self.sort.setItemText(0, "Highest listeners" if source == "listeners" else "Highest streams")
+        self.sort.model().item(0).setEnabled(source in {"track_streams", "listeners"})
+        self.sort.model().item(1).setEnabled(source != "listeners")
+        self.sort.setCurrentIndex(1 if source.endswith("positions") else 0)
+        self.sort.blockSignals(False)
+        self.table.setHorizontalHeaderItem(3, QTableWidgetItem("Listeners" if source == "listeners" else "Chart streams"))
         self.refresh()
 
     def refresh(self):
@@ -61,12 +82,13 @@ class AppearanceDialog(QDialog):
                 self.db, self.category, **self.filters, search=self.search, limit=self.limit,
                 hide_repeats=self.hide_repeats.isChecked(), sort=self.sort.currentData(),
                 include_demo=self.include_demo,
+                source=self.source.currentData(),
             )
             self.table.setRowCount(len(self.rows))
             for index, row in enumerate(self.rows):
                 count = row["chart_appearances"]
                 values = [row["entity_name"], row["entity_id"], row["chart_date"],
-                          f"{row['streams']:,}", row["position"] if row["position"] is not None else "Unavailable",
+                          f"{row['streams']:,}" if row["streams"] is not None else (f"{row['listeners']:,}" if row.get("listeners") is not None else "Not supplied"), row["position"] if row["position"] is not None else "Unavailable",
                           f"Repeat ({count})" if count > 1 else str(count)]
                 for column, value in enumerate(values):
                     item = QTableWidgetItem(str(value))
@@ -77,6 +99,8 @@ class AppearanceDialog(QDialog):
                 + ("One best-sorted showing per entity." if self.hide_repeats.isChecked() else "Additional appearances are visible.")
                 if self.rows else "No showings with stable IDs match the active filters."
             )
+            if self.source.currentData() != "track_streams":
+                self.status.setText(self.status.text() + " Source positions/listener snapshots are separate metrics; no artist or album stream totals are inferred.")
         except Exception as error:
             self.rows = []
             self.table.setRowCount(0)

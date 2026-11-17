@@ -15,10 +15,16 @@ from .runtime import (
     handle_uncaught_exception,
     legacy_database_candidates,
     migrate_legacy_database,
+    initialize_release_seed,
 )
 
 
 def main() -> int:
+    if "--release-persistence-check" in sys.argv:
+        from pathlib import Path
+        from .release_acceptance import verify_persistence
+
+        return verify_persistence(Path(sys.argv[sys.argv.index("--release-persistence-check") + 1]))
     if "--release-export-test" in sys.argv:
         from .release_checks import run_packaged_export_checks
 
@@ -66,6 +72,13 @@ def main() -> int:
     try:
         demo_smoke_test = "--demo-smoke-test" in sys.argv
         smoke_test = "--smoke-test" in sys.argv or demo_smoke_test
+        if not DB_PATH.exists():
+            try:
+                initialize_release_seed()
+            except Exception as error:
+                LOGGER.exception("Historical data initialization failed")
+                QMessageBox.critical(None, "Historical data could not be initialized", str(error))
+                return 1
         if not smoke_test and not DB_PATH.exists():
             legacy_path = next(
                 (path for path in legacy_database_candidates() if path.is_file()),
@@ -111,7 +124,12 @@ def main() -> int:
             return 1
         window.show()
 
-        if demo_smoke_test:
+        if "--release-acceptance" in sys.argv:
+            from pathlib import Path
+            from .release_acceptance import start_acceptance
+
+            start_acceptance(app, window, Path(sys.argv[sys.argv.index("--release-acceptance") + 1]))
+        elif demo_smoke_test:
             app.setQuitOnLastWindowClosed(False)
             timeout = QTimer(window)
             timeout.setSingleShot(True)

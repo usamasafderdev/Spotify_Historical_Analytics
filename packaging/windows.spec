@@ -1,12 +1,18 @@
 from pathlib import Path
 import sys
+import os
 
 from PyInstaller.utils.hooks import collect_data_files
 
 ROOT = Path(SPECPATH).parent
+WORK = Path(os.environ.get("SPOTIFY_RELEASE_WORK", ROOT / "build"))
 sys.path.insert(0, str(ROOT / "src"))
 
-datas = [(str(ROOT / "assets"), "assets"), (str(ROOT / "build" / "release-notices"), "notices")]
+datas = [(str(ROOT / "assets"), "assets"), (str(WORK / "release-notices"), "notices")]
+if os.environ.get("SPOTIFY_RELEASE_SEED"):
+    datas.append((os.environ["SPOTIFY_RELEASE_SEED"], "seed"))
+if os.environ.get("SPOTIFY_COMPLIANCE"):
+    datas.append((os.environ["SPOTIFY_COMPLIANCE"], "compliance"))
 binaries = []
 hiddenimports = [
     "PySide6.QtSvg",
@@ -50,6 +56,7 @@ analysis = Analysis(
         "tkinter",
         "PIL",
         "pyarrow",
+        "lxml",
         "pandas.tests",
         "PySide6.QtTest",
         "pyqtgraph.opengl",
@@ -63,6 +70,10 @@ analysis = Analysis(
 # standard input context; omit that optional plugin and its DLL/resources.
 analysis.binaries = [entry for entry in analysis.binaries if "virtualkeyboard" not in entry[0].lower()]
 analysis.datas = [entry for entry in analysis.datas if "virtualkeyboard" not in entry[0].lower()]
+if os.environ.get("SPOTIFY_COMPLIANCE"):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from package_runtime import prepare_binaries
+    analysis.binaries = prepare_binaries(analysis.binaries, Path(os.environ["SPOTIFY_COMPLIANCE"]), WORK)
 pyz = PYZ(analysis.pure)
 executable = EXE(
     pyz,
@@ -77,7 +88,7 @@ executable = EXE(
     console=False,
     disable_windowed_traceback=True,
     icon=str(ROOT / "assets" / "app_icon.ico"),
-    version=str(ROOT / "build" / "version_info.txt"),
+    version=str(WORK / "version_info.txt"),
 )
 collection = COLLECT(
     executable,

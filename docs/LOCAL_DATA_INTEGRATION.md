@@ -1,5 +1,27 @@
 # Local development integration
 
+## Current integration: 2026-11-17
+
+The existing isolated database was extended in place, without replacing the per-user database or repeating completed metadata/album/listener/artist imports. Current coverage is **721,171 US daily song observations** on **3,606 dates**, 2017-01-01 through 2026-11-15, for **15,152 stable track IDs** and **316,705,690,324 chart streams**. Every calendar date in that interval has some observations; this is not a completeness/authenticity certification. Invalid source rows and short chart dates remain unfilled.
+
+`D:\Downloads\charts_songs_daily.csv` (11,128,590,058 bytes) was streamed once: 45,262,030 rows scanned, 44,540,833 non-US rows excluded, 26 invalid US rows rejected, and 721,171 observations accepted. Exact supplied artist URI relationships added 3,234 links. Source names are retained whole; no name-based person or album inference occurs.
+
+`D:\Downloads\charts.csv\charts.csv` (3,483,476,388 bytes) was streamed once: 26,173,514 rows scanned, 19,957,720 non-US Top 200 rows and 5,851,610 other-chart rows excluded. It supplies 210,976 identical stable-ID overlaps, 152,507 same-ID conflicts, and 701 different-ID conflicts occupying an established date/rank slot. No additional observations from this file remain in totals. The 701 rows initially classified as new identities were quarantined after slot-level verification, with exact incoming values retained rather than merging IDs or double-counting the same chart slot. Only this task's incoming batch was corrected; earlier source observations are unchanged. Conflict totals are **153,208**. Of same-ID conflicts, 51 differ in streams, 573 in position, and 152,174 in labels; these categories overlap. `integration_conflicts` and `integration_slot_conflicts` retain the differences for review.
+
+`D:\Downloads\charts_artists_daily.csv` (3,082,532,361 bytes) was already complete and was skipped using its manifest. Its 368,000 US daily positions cover 866 artists and 1,840 dates, 2021-10-21 through 2026-11-15. The source does not supply direct artist streams. Existing 61,588 album positions and 3,262,204 listener snapshots remain separate and unchanged. The app exposes all three metrics through **Chart showings > Source**, without inventing song/album membership or stream totals.
+
+Source-weekly songs remain **12,599 observations**, 2,711 tracks, 63 dates, 2022-01-06 through 2026-10-08, totaling **42,913,401,825 streams**. These are sampled weeks, not continuous weekly history. Monday-Sunday derived weeks use only observed daily records, with 131,729 track/week observations on 516 Sunday reporting dates; derived and source-weekly streams never combine. The historical v0.1.7 figures (716,997 daily, 65,599 source-weekly, 125,361 derived track/weeks) are comparison figures, not targets used to manufacture rows.
+
+Current entities/relationships: 220,884 tracks, 75,200 artists, 26,631 albums, 349,341 track-to-artist links, 28,984 album-to-artist links, **0 track-to-album links**, and 705,473 retained URL references. Source-only alternate IDs can remain in metadata without an accepted chart observation. The database occupies 2,730,164,224 bytes; free pages from the tiny quarantine were not reclaimed through a redundant full-database rebuild.
+
+All generated databases, staging, caches, test profiles, build work and release artifacts for this task use `local-data/v018-work` on D:. Files were checked for age and opened with Windows handles excluding active writers. Large daily sources commit 2,000-row batches with checkpoints and progress records; an interrupted file is never marked complete. File SHA-256 values, source paths, schema fingerprints for newly streamed sources, exclusions and conflicts are in `source-manifest.json`/SQLite. Unchanged files retain their previously calculated hashes without a full rescan. Temporary storage is monitored; no raw multi-GB CSV was copied.
+
+The release seed is a frozen snapshot of this integration, initialized only when a user database does not already exist. External data redistribution authorization and original publisher/version remain unestablished: the handover is **INTERNAL-READY**, not FINAL-CLIENT. See [release coverage](V018_DATA_COVERAGE.md) and [installation instructions](V018_INSTALLATION_GUIDE.md).
+
+## Earlier integration: 2026-11-16
+
+The following is the retained earlier integration record; its then-current sizes, test totals and packaging status are historical, superseded by the current section above.
+
 Integrated on 2026-11-16 and updated with album-chart and listener observations in one isolated database:
 `local-data/v018-integration/database/analytics.db`.
 The existing per-user database, downloads, and previous releases are unchanged.

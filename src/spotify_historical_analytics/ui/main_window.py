@@ -700,7 +700,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         intro = QLabel(
-            "Supplied artist IDs receive full credit for mapped charting-song streams. Unresolved credits remain grouped as the exact credited string; names are never split heuristically. Artist totals can overlap."
+            "Supplied artist IDs receive full credit for mapped charting-song streams. Unresolved credits remain grouped as the exact credited string; names are never split heuristically. Artist totals can overlap. Open Chart showings > Source for separate US daily artist positions or listener snapshots."
         )
         intro.setObjectName("muted")
         intro.setWordWrap(True)
@@ -751,7 +751,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         intro = QLabel(
-            "Album charting-track streams are derived only from user-supplied stable track-ID to album-ID mappings. Editions with different album IDs remain separate."
+            "Album charting-track streams are derived only from user-supplied stable track-ID to album-ID mappings. Editions with different album IDs remain separate. Open Chart showings > Source > US weekly album positions for independently supplied album rankings without stream counts."
         )
         intro.setObjectName("muted")
         intro.setWordWrap(True)
